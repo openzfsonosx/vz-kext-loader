@@ -1,0 +1,9 @@
+.DS_Store
+*.swp
+# work artifacts / extracted firmware — never commit Apple binaries
+*.bin
+*.im4p
+*.im4m
+*.img4
+*.dmg
+scratch/
