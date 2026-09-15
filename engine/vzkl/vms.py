@@ -150,6 +150,17 @@ def discover() -> dict:
 
 
 # --- VM control (utmctl; non-privileged) ------------------------------------
+#
+# Caveats learned the hard way:
+#  * utmctl matches UUIDs CASE-SENSITIVELY; the registry uses the config's case.
+#    We resolve the caller's uuid against `utmctl list` to be safe.
+#  * utmctl exits 0 even on some failures ("Operation not available"), so rc is
+#    not a reliable success signal — we also scan the combined output for errors.
+#  * utmctl controls UTM via AppleEvents/ScriptingBridge, so a GUI app spawning
+#    it needs macOS Automation permission for UTM (declared in the app plist).
+
+_ERROR_MARKERS = ("error:", "error from event", "not found", "not available")
+
 
 def _utmctl(*args) -> tuple[int, str, str]:
     if not os.path.exists(UTMCTL):
@@ -158,22 +169,56 @@ def _utmctl(*args) -> tuple[int, str, str]:
     return cp.returncode, (cp.stdout or "").strip(), (cp.stderr or "").strip()
 
 
+def _resolve_uuid(uuid: str) -> str:
+    """Return the registry's exact-case UUID matching `uuid`, else `uuid`."""
+    want = uuid.strip().upper()
+    for reg in _utmctl_list().keys():   # keys are already upper()
+        if reg == want:
+            # Recover the exact registered spelling from a fresh list line.
+            return _registered_spelling(uuid) or uuid
+    return uuid
+
+
+def _registered_spelling(uuid: str) -> str | None:
+    rc, out, _ = _utmctl("list")
+    want = uuid.strip().upper()
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if parts and parts[0].upper() == want:
+            return parts[0]
+    return None
+
+
+def _failed(rc: int, out: str, err: str) -> str:
+    """Return an error string if the op looks failed, else ''."""
+    combined = f"{out}\n{err}".lower()
+    if rc not in (0,) or any(m in combined for m in _ERROR_MARKERS):
+        return (err or out or f"utmctl exited {rc}").strip()
+    return ""
+
+
 def vm_status(uuid: str) -> dict:
-    rc, out, err = _utmctl("status", uuid)
-    return {"uuid": uuid, "status": out or "unknown", "ok": rc == 0, "error": err}
+    rc, out, err = _utmctl("status", _resolve_uuid(uuid))
+    problem = _failed(rc, out, err)
+    return {"uuid": uuid, "status": (out or "unknown") if not problem else "unknown",
+            "ok": not problem, "error": problem}
 
 
 def vm_start(uuid: str) -> dict:
-    rc, out, err = _utmctl("start", uuid)
-    return {"uuid": uuid, "ok": rc == 0, "output": out, "error": err}
+    rc, out, err = _utmctl("start", _resolve_uuid(uuid))
+    problem = _failed(rc, out, err)
+    return {"uuid": uuid, "ok": not problem, "output": out, "error": problem}
 
 
 def vm_stop(uuid: str) -> dict:
-    rc, out, err = _utmctl("stop", uuid)
-    return {"uuid": uuid, "ok": rc == 0, "output": out, "error": err}
+    rc, out, err = _utmctl("stop", _resolve_uuid(uuid))
+    problem = _failed(rc, out, err)
+    return {"uuid": uuid, "ok": not problem, "output": out, "error": problem}
 
 
 def vm_ip(uuid: str) -> dict:
-    rc, out, err = _utmctl("ip-address", uuid)
-    ips = [ln.strip() for ln in out.splitlines() if ln.strip()]
-    return {"uuid": uuid, "ok": rc == 0, "ips": ips, "error": err}
+    rc, out, err = _utmctl("ip-address", _resolve_uuid(uuid))
+    ips = [ln.strip() for ln in out.splitlines()
+           if ln.strip() and "error" not in ln.lower()]
+    problem = _failed(rc, out, err)
+    return {"uuid": uuid, "ok": not problem, "ips": ips, "error": problem}

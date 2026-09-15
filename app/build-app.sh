@@ -24,9 +24,25 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/VZKextLoader"
 cp Info.plist "$APP/Contents/Info.plist"
 
-# Ad-hoc sign so Gatekeeper/TCC treat it as a stable identity locally.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || \
-    echo "   (codesign skipped; unsigned bundle still runs locally)"
+# Sign with a stable identity so macOS can grant/remember Automation permission
+# for controlling UTM (utmctl uses AppleEvents). Prefer a Developer ID; fall back
+# to ad-hoc. Override the identity with VZKL_SIGN_ID.
+SIGN_ID="${VZKL_SIGN_ID:-}"
+if [ -z "$SIGN_ID" ]; then
+    SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null \
+        | grep "Developer ID Application" | head -1 \
+        | sed -E 's/^[^"]*"([^"]*)".*$/\1/')
+fi
+if [ -n "$SIGN_ID" ]; then
+    echo ">> codesign: $SIGN_ID"
+    codesign --force --sign "$SIGN_ID" "$APP" \
+        || { echo "   (Developer ID signing failed; falling back to ad-hoc)"; \
+             codesign --force --sign - "$APP" >/dev/null 2>&1 || true; }
+else
+    echo ">> codesign: ad-hoc (no Developer ID found; Automation grant may re-prompt each build)"
+    codesign --force --sign - "$APP" >/dev/null 2>&1 || \
+        echo "   (codesign skipped; unsigned bundle still runs locally)"
+fi
 
 echo ">> done: $APP"
 echo "   run:  open $APP        (or: $BIN  to see console logs)"

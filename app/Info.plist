@@ -24,5 +24,7 @@
     <true/>
     <key>LSUIElement</key>
     <false/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>vz-kext-loader controls UTM (via utmctl) to start and stop the virtual machine you select.</string>
 </dict>
 </plist>

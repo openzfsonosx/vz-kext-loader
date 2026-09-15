@@ -185,13 +185,11 @@ struct ContentView: View {
     private var bootLogCard: some View {
         GroupBox {
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(model.bootLog.enumerated()), id: \.offset) { _, line in
-                        Text(line).font(.system(.caption, design: .monospaced))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(4)
+                Text(model.bootLog.joined(separator: "\n"))
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(4)
             }
             .frame(height: 140)
         } label: {
