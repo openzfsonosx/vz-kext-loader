@@ -23,6 +23,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/VZKextLoader"
 cp Info.plist "$APP/Contents/Info.plist"
+printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # Sign with a stable identity so macOS can grant/remember Automation permission
 # for controlling UTM (utmctl uses AppleEvents). Prefer a Developer ID; fall back
@@ -33,14 +34,19 @@ if [ -z "$SIGN_ID" ]; then
         | grep "Developer ID Application" | head -1 \
         | sed -E 's/^[^"]*"([^"]*)".*$/\1/')
 fi
+ENT="VZKextLoader.entitlements"
 if [ -n "$SIGN_ID" ]; then
-    echo ">> codesign: $SIGN_ID"
-    codesign --force --sign "$SIGN_ID" "$APP" \
+    echo ">> codesign: $SIGN_ID (hardened runtime + automation entitlement)"
+    codesign --force --options runtime --entitlements "$ENT" --timestamp \
+             --sign "$SIGN_ID" "$APP" \
+        || { echo "   (hardened signing failed; trying without timestamp)"; \
+             codesign --force --options runtime --entitlements "$ENT" \
+                      --sign "$SIGN_ID" "$APP" \
         || { echo "   (Developer ID signing failed; falling back to ad-hoc)"; \
-             codesign --force --sign - "$APP" >/dev/null 2>&1 || true; }
+             codesign --force --entitlements "$ENT" --sign - "$APP" >/dev/null 2>&1 || true; }; }
 else
     echo ">> codesign: ad-hoc (no Developer ID found; Automation grant may re-prompt each build)"
-    codesign --force --sign - "$APP" >/dev/null 2>&1 || \
+    codesign --force --entitlements "$ENT" --sign - "$APP" >/dev/null 2>&1 || \
         echo "   (codesign skipped; unsigned bundle still runs locally)"
 fi
 
