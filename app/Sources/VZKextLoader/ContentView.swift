@@ -2,81 +2,205 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @State private var showAllChecks = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-            if let err = model.errorText {
-                errorBanner(err)
-            }
-            checkList
-            Divider()
-            footer
+        NavigationSplitView {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+        } detail: {
+            detail
         }
-        .frame(minWidth: 560, minHeight: 460)
-        .onAppear { if model.checks.isEmpty { model.runChecks() } }
+        .frame(minWidth: 820, minHeight: 520)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { model.refreshAll() }) {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(model.checkingHost || model.loadingVMs)
+            }
+        }
+        .onAppear {
+            if model.checks.isEmpty { model.refreshAll() }
+        }
     }
 
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("vz-kext-loader").font(.title2).bold()
-                Text("Host Requirements").font(.subheadline).foregroundStyle(.secondary)
+    // MARK: Sidebar — VM list
+
+    private var sidebar: some View {
+        List(selection: $model.selectedVMID) {
+            Section("Virtual Machines") {
+                ForEach(model.vms) { vm in
+                    VMRow(vm: vm).tag(vm.id)
+                }
+                if model.vms.isEmpty && !model.loadingVMs {
+                    Text("No UTM VMs found").foregroundStyle(.secondary)
+                }
             }
-            Spacer()
-            Button(action: { model.runChecks() }) {
-                Label("Re-check", systemImage: "arrow.clockwise")
-            }
-            .disabled(model.running)
         }
-        .padding()
+        .overlay {
+            if model.loadingVMs && model.vms.isEmpty {
+                ProgressView("Scanning VMs…")
+            }
+        }
     }
 
-    private func errorBanner(_ text: String) -> some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(.white)
-            .padding(8)
+    // MARK: Detail
+
+    private var detail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let err = model.errorText {
+                    Label(err, systemImage: "exclamationmark.octagon.fill")
+                        .foregroundStyle(.white)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
+                hostCard
+                vmCard
+                actionBar
+            }
+            .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.red.opacity(0.85))
+        }
     }
 
-    private var checkList: some View {
-        List(model.checks) { c in
-            HStack(alignment: .top, spacing: 10) {
-                StatusDot(status: c.status)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(c.label).fontWeight(.medium)
-                        Spacer()
-                        Text(c.detail).foregroundStyle(.secondary).font(.callout)
-                            .multilineTextAlignment(.trailing)
+    private var hostCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: model.hostReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(model.hostReady ? .green : .orange)
+                    Text(model.hostSummary).fontWeight(.medium)
+                    Spacer()
+                    if model.checkingHost { ProgressView().controlSize(.small) }
+                    Button(showAllChecks ? "Hide details" : "Show details") {
+                        showAllChecks.toggle()
                     }
-                    if !c.fix.isEmpty && (c.status == "fail" || c.status == "warn") {
-                        Text(c.fix).font(.caption).foregroundStyle(.secondary)
+                    .buttonStyle(.link)
+                }
+                if showAllChecks {
+                    Divider()
+                    ForEach(model.checks) { c in
+                        HStack(alignment: .top, spacing: 8) {
+                            StatusDot(status: c.status)
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack {
+                                    Text(c.label)
+                                    Spacer()
+                                    Text(c.detail).foregroundStyle(.secondary).font(.callout)
+                                }
+                                if !c.fix.isEmpty && (c.status == "fail" || c.status == "warn") {
+                                    Text(c.fix).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 1)
                     }
                 }
             }
-            .padding(.vertical, 2)
-        }
-        .listStyle(.inset)
-        .overlay {
-            if model.running && model.checks.isEmpty {
-                ProgressView("Checking host…")
-            }
+            .padding(6)
+        } label: {
+            Label("Host Requirements", systemImage: "desktopcomputer")
         }
     }
 
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Image(systemName: model.ready ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(model.ready ? .green : .orange)
-            Text(model.summary).font(.callout)
-            Spacer()
-            if model.running { ProgressView().controlSize(.small) }
+    @ViewBuilder private var vmCard: some View {
+        GroupBox {
+            if let vm = model.selectedVM {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        StatusBadge(status: vm.status)
+                        Text(vm.name).font(.title3).bold()
+                        Spacer()
+                        if vm.patchable {
+                            Label("Patchable", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green).font(.callout)
+                        } else {
+                            Label("Not patchable", systemImage: "xmark.circle.fill")
+                                .foregroundStyle(.red).font(.callout)
+                        }
+                    }
+                    if !vm.patchable && !vm.reason.isEmpty {
+                        Text(vm.reason).font(.callout).foregroundStyle(.secondary)
+                    }
+                    Divider()
+                    infoRow("UUID", vm.uuid)
+                    if !vm.backend.isEmpty { infoRow("Backend", vm.backend) }
+                    if !vm.os.isEmpty { infoRow("OS", "\(vm.os)  \(vm.arch)") }
+                    if !vm.bundle_path.isEmpty { infoRow("Bundle", vm.bundle_path) }
+                }
+                .padding(6)
+            } else {
+                Text("Select a VM from the sidebar.")
+                    .foregroundStyle(.secondary)
+                    .padding(6)
+            }
+        } label: {
+            Label("Selected VM", systemImage: "shippingbox")
         }
-        .padding()
+    }
+
+    private var actionBar: some View {
+        let vm = model.selectedVM
+        let canAct = model.hostReady && (vm?.patchable ?? false)
+        return HStack(spacing: 12) {
+            Button { } label: { Label("Patch…", systemImage: "bandage") }
+                .disabled(true)
+            Button { } label: { Label("Boot (overlay)", systemImage: "play.fill") }
+                .disabled(true)
+            Button { } label: { Label("Verify", systemImage: "checkmark.shield") }
+                .disabled(true)
+            Spacer()
+            Text(canAct ? "Actions arrive in the next slices."
+                        : "Select a patchable VM on a ready host.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func infoRow(_ k: String, _ v: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(k).frame(width: 66, alignment: .leading).foregroundStyle(.secondary)
+            Text(v).textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+    }
+}
+
+// MARK: - Row / badge helpers
+
+struct VMRow: View {
+    let vm: VMItem
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(vm.status == "started" ? Color.green : Color.secondary.opacity(0.5))
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(vm.name).lineLimit(1)
+                Text(vm.patchable ? "patchable" : "not patchable")
+                    .font(.caption)
+                    .foregroundStyle(vm.patchable ? .green : .secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+struct StatusBadge: View {
+    let status: String
+    var body: some View {
+        Text(status)
+            .font(.caption).bold()
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(status == "started" ? Color.green.opacity(0.2) : Color.secondary.opacity(0.15))
+            .foregroundStyle(status == "started" ? .green : .secondary)
+            .clipShape(Capsule())
     }
 }
 
@@ -85,8 +209,8 @@ struct StatusDot: View {
     var body: some View {
         Image(systemName: symbol)
             .foregroundStyle(color)
-            .font(.system(size: 14, weight: .bold))
-            .frame(width: 18)
+            .font(.system(size: 13, weight: .bold))
+            .frame(width: 16)
     }
     private var symbol: String {
         switch status {

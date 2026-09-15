@@ -17,6 +17,27 @@ struct CheckResult: Codable {
     var summary: String
 }
 
+struct VMItem: Codable, Identifiable, Hashable {
+    var uuid: String
+    var name: String
+    var status: String        // started | stopped | unknown
+    var backend: String
+    var os: String
+    var arch: String
+    var bundle_path: String
+    var aux_path: String
+    var patchable: Bool
+    var reason: String
+
+    var id: String { uuid }
+}
+
+struct VMListResult: Codable {
+    var vms: [VMItem]
+    var patchable_count: Int
+    var search_paths: [String]
+}
+
 enum EngineError: LocalizedError {
     case engineNotFound(String)
     case launchFailed(String)
@@ -91,5 +112,9 @@ enum Engine {
 
     static func check() throws -> CheckResult {
         try runJSON(["check"], as: CheckResult.self)
+    }
+
+    static func listVMs() throws -> VMListResult {
+        try runJSON(["list-vms"], as: VMListResult.self)
     }
 }

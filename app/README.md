@@ -30,9 +30,13 @@ VZKL_ENGINE_DIR=/path/to/vz-kext-loader/engine open VZKextLoader.app
 
 ## Status
 
-- **Host Requirements** screen: runs `vzkl check`, renders each requirement as a
+- **Host Requirements**: runs `vzkl check`, renders each requirement as a
   green/amber/red row with a remediation hint. Implemented.
-- VM picker, Patch, Boot (with overlay), Verify: to come.
+- **VM sidebar**: runs `vzkl list-vms`, lists UTM VMs with run status and a
+  patchable/not-patchable classification; detail pane shows the selected VM's
+  backend/OS/arch/bundle. Implemented. External VMs (e.g. on `/Volumes/NVMe`)
+  are found by setting `VZKL_VM_SEARCH_PATHS=/Volumes/NVMe/VMs` (colon-separated).
+- Patch, Boot (with overlay), Verify: buttons present, wired in upcoming slices.
 
 ## Layout
 

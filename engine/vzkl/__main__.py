@@ -13,6 +13,7 @@ import sys
 
 from . import __version__
 from . import checks
+from . import vms
 
 
 def _print_checks_human(result: dict) -> None:
@@ -37,6 +38,20 @@ def cmd_check(args) -> int:
     return 0 if result["ready"] else 1
 
 
+def cmd_list_vms(args) -> int:
+    result = vms.discover()
+    if args.json:
+        json.dump(result, sys.stdout)
+        sys.stdout.write("\n")
+    else:
+        for v in result["vms"]:
+            mark = "✓ patchable" if v["patchable"] else "✗ " + (v["reason"] or "not patchable")
+            print(f" [{v['status']:>7}] {v['name']}")
+            print(f"           {v['uuid']}  ({mark})")
+        print(f"\n{result['patchable_count']} patchable VM(s)")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="vzkl", description="vz-kext-loader engine")
     p.add_argument("--version", action="version", version=f"vzkl {__version__}")
@@ -45,6 +60,10 @@ def main(argv=None) -> int:
     pc = sub.add_parser("check", help="Run host requirement checks")
     pc.add_argument("--json", action="store_true", help="Emit JSON")
     pc.set_defaults(func=cmd_check)
+
+    pv = sub.add_parser("list-vms", help="Discover UTM VMs and classify patchability")
+    pv.add_argument("--json", action="store_true", help="Emit JSON")
+    pv.set_defaults(func=cmd_list_vms)
 
     args = p.parse_args(argv)
     return args.func(args)
