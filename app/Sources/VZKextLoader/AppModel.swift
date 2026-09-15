@@ -73,15 +73,16 @@ final class AppModel: ObservableObject {
                 }
                 await MainActor.run { self.overlayMounted = true }
 
-                await step("Starting VM via utmctl…")
-                let s = try Engine.vmStart(vm.uuid)
+                await step("Starting VM (scripting UTM)…")
+                let s = await MainActor.run { UTMScript.start(vm.uuid) }
                 guard s.ok else {
-                    throw EngineError.launchFailed(s.error ?? "utmctl start failed")
+                    throw EngineError.launchFailed(s.error ?? "UTM start failed")
                 }
                 await step("Start issued; watching status…")
                 for _ in 0..<20 {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    if let vs = try? Engine.vmStatus(vm.uuid), vs.status == "started" {
+                    let vs = await MainActor.run { UTMScript.status(vm.uuid) }
+                    if vs.ok && vs.value == "started" {
                         await step("VM is running. (Expect a double-boot if a kext rebuild is pending.)")
                         break
                     }
@@ -99,9 +100,9 @@ final class AppModel: ObservableObject {
         bootBusy = true
         log("Stopping \(vm.name)…")
         Task.detached(priority: .userInitiated) {
-            let s = try? Engine.vmStop(vm.uuid)
+            let s = await MainActor.run { UTMScript.stop(vm.uuid) }
             await MainActor.run {
-                self.log(s?.ok == true ? "Stop issued." : "Stop failed: \(s?.error ?? "unknown")")
+                self.log(s.ok ? "Stop issued." : "Stop failed: \(s.error ?? "unknown")")
                 self.bootBusy = false
                 self.loadVMs()
             }
@@ -161,11 +162,33 @@ final class AppModel: ObservableObject {
                     }
                     self.loadingVMs = false
                 }
+                await self.enrichStatuses()
             } catch {
                 await MainActor.run {
                     self.errorText = error.localizedDescription
                     self.loadingVMs = false
                 }
+            }
+        }
+    }
+
+    /// utmctl's status is Automation-gated and unreliable from a spawned child,
+    /// so refresh each VM's run status by scripting UTM from the app directly.
+    /// The first such call also triggers the Automation permission prompt.
+    private func enrichStatuses() async {
+        let ids = await MainActor.run { self.vms.map { $0.uuid } }
+        var statusByID: [String: String] = [:]
+        for id in ids {
+            let outcome = await MainActor.run { UTMScript.status(id) }
+            if outcome.ok, !outcome.value.isEmpty {
+                statusByID[id] = outcome.value
+            }
+        }
+        await MainActor.run {
+            self.vms = self.vms.map { vm in
+                var v = vm
+                if let s = statusByID[vm.uuid] { v.status = s }
+                return v
             }
         }
     }
