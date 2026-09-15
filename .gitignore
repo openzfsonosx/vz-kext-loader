@@ -7,3 +7,9 @@
 *.img4
 *.dmg
 scratch/
+
+# Swift build artifacts
+app/.build/
+app/VZKextLoader.app/
+*.app
+DerivedData/
