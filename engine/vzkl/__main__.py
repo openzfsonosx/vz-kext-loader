@@ -14,6 +14,7 @@ import sys
 from . import __version__
 from . import checks
 from . import vms
+from . import overlay
 
 
 def _print_checks_human(result: dict) -> None:
@@ -52,6 +53,52 @@ def cmd_list_vms(args) -> int:
     return 0
 
 
+def cmd_overlay_status(args) -> int:
+    result = overlay.status()
+    if args.json:
+        json.dump(result, sys.stdout); sys.stdout.write("\n")
+    else:
+        print("overlay mounted:", result["mounted"])
+        print("device:", result["device"] or "(none attached)")
+    return 0
+
+
+def cmd_overlay_build(args) -> int:
+    try:
+        result = overlay.build(args.out) if args.out else overlay.build()
+        result["ok"] = True
+    except Exception as e:  # noqa: BLE001 - report to caller as JSON
+        result = {"ok": False, "error": str(e)}
+    if args.json:
+        json.dump(result, sys.stdout); sys.stdout.write("\n")
+    else:
+        if result.get("ok"):
+            print("built overlay:", result["dmg"])
+            print("device:", result["device"], "  avpbooter:", result["avpbooter_state"])
+            print("mount:", " ".join(result["mount_argv"]))
+        else:
+            print("build failed:", result["error"])
+    return 0 if result.get("ok") else 1
+
+
+def cmd_vm(args) -> int:
+    if args.op == "status":
+        result = vms.vm_status(args.uuid)
+    elif args.op == "start":
+        result = vms.vm_start(args.uuid)
+    elif args.op == "stop":
+        result = vms.vm_stop(args.uuid)
+    elif args.op == "ip":
+        result = vms.vm_ip(args.uuid)
+    else:
+        result = {"ok": False, "error": f"unknown op {args.op}"}
+    if args.json:
+        json.dump(result, sys.stdout); sys.stdout.write("\n")
+    else:
+        print(result)
+    return 0 if result.get("ok") else 1
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="vzkl", description="vz-kext-loader engine")
     p.add_argument("--version", action="version", version=f"vzkl {__version__}")
@@ -64,6 +111,22 @@ def main(argv=None) -> int:
     pv = sub.add_parser("list-vms", help="Discover UTM VMs and classify patchability")
     pv.add_argument("--json", action="store_true", help="Emit JSON")
     pv.set_defaults(func=cmd_list_vms)
+
+    po = sub.add_parser("overlay-status", help="Report AVPBooter overlay mount state")
+    po.add_argument("--json", action="store_true", help="Emit JSON")
+    po.set_defaults(func=cmd_overlay_status)
+
+    pb = sub.add_parser("overlay-build",
+                        help="Build+attach the patched-AVPBooter overlay (non-privileged)")
+    pb.add_argument("--out", help="dmg path (default: managed Application Support path)")
+    pb.add_argument("--json", action="store_true", help="Emit JSON")
+    pb.set_defaults(func=cmd_overlay_build)
+
+    pm = sub.add_parser("vm", help="Control a VM via utmctl")
+    pm.add_argument("op", choices=["status", "start", "stop", "ip"])
+    pm.add_argument("uuid")
+    pm.add_argument("--json", action="store_true", help="Emit JSON")
+    pm.set_defaults(func=cmd_vm)
 
     args = p.parse_args(argv)
     return args.func(args)

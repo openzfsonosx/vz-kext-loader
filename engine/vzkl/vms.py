@@ -147,3 +147,33 @@ def discover() -> dict:
         "patchable_count": sum(1 for v in ordered if v.patchable),
         "search_paths": _search_dirs(),
     }
+
+
+# --- VM control (utmctl; non-privileged) ------------------------------------
+
+def _utmctl(*args) -> tuple[int, str, str]:
+    if not os.path.exists(UTMCTL):
+        return 127, "", "utmctl not found"
+    cp = run([UTMCTL, *args], timeout=40)
+    return cp.returncode, (cp.stdout or "").strip(), (cp.stderr or "").strip()
+
+
+def vm_status(uuid: str) -> dict:
+    rc, out, err = _utmctl("status", uuid)
+    return {"uuid": uuid, "status": out or "unknown", "ok": rc == 0, "error": err}
+
+
+def vm_start(uuid: str) -> dict:
+    rc, out, err = _utmctl("start", uuid)
+    return {"uuid": uuid, "ok": rc == 0, "output": out, "error": err}
+
+
+def vm_stop(uuid: str) -> dict:
+    rc, out, err = _utmctl("stop", uuid)
+    return {"uuid": uuid, "ok": rc == 0, "output": out, "error": err}
+
+
+def vm_ip(uuid: str) -> dict:
+    rc, out, err = _utmctl("ip-address", uuid)
+    ips = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    return {"uuid": uuid, "ok": rc == 0, "ips": ips, "error": err}

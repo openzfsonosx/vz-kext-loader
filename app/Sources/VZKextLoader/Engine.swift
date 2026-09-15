@@ -38,6 +38,32 @@ struct VMListResult: Codable {
     var search_paths: [String]
 }
 
+struct OverlayStatus: Codable {
+    var mounted: Bool
+    var device: String
+    var dmg: String
+    var framework_resources: String?
+}
+
+struct OverlayBuild: Codable {
+    var ok: Bool
+    var dmg: String?
+    var device: String?
+    var avpbooter_state: String?
+    var avpbooter_sha: String?
+    var mount_argv: [String]?
+    var unmount_argv: [String]?
+    var error: String?
+}
+
+struct VMOp: Codable {
+    var uuid: String?
+    var status: String?
+    var ok: Bool
+    var output: String?
+    var error: String?
+}
+
 enum EngineError: LocalizedError {
     case engineNotFound(String)
     case launchFailed(String)
@@ -116,5 +142,25 @@ enum Engine {
 
     static func listVMs() throws -> VMListResult {
         try runJSON(["list-vms"], as: VMListResult.self)
+    }
+
+    static func overlayStatus() throws -> OverlayStatus {
+        try runJSON(["overlay-status"], as: OverlayStatus.self)
+    }
+
+    static func overlayBuild() throws -> OverlayBuild {
+        try runJSON(["overlay-build"], as: OverlayBuild.self)
+    }
+
+    static func vmStart(_ uuid: String) throws -> VMOp {
+        try runJSON(["vm", "start", uuid], as: VMOp.self)
+    }
+
+    static func vmStop(_ uuid: String) throws -> VMOp {
+        try runJSON(["vm", "stop", uuid], as: VMOp.self)
+    }
+
+    static func vmStatus(_ uuid: String) throws -> VMOp {
+        try runJSON(["vm", "status", uuid], as: VMOp.self)
     }
 }

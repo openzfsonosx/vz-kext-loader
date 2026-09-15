@@ -62,6 +62,7 @@ struct ContentView: View {
                 hostCard
                 vmCard
                 actionBar
+                if !model.bootLog.isEmpty { bootLogCard }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -146,18 +147,55 @@ struct ContentView: View {
 
     private var actionBar: some View {
         let vm = model.selectedVM
-        let canAct = model.hostReady && (vm?.patchable ?? false)
-        return HStack(spacing: 12) {
-            Button { } label: { Label("Patch…", systemImage: "bandage") }
-                .disabled(true)
-            Button { } label: { Label("Boot (overlay)", systemImage: "play.fill") }
-                .disabled(true)
-            Button { } label: { Label("Verify", systemImage: "checkmark.shield") }
-                .disabled(true)
-            Spacer()
-            Text(canAct ? "Actions arrive in the next slices."
-                        : "Select a patchable VM on a ready host.")
-                .font(.caption).foregroundStyle(.secondary)
+        let started = vm?.status == "started"
+        let canBoot = model.hostReady && (vm?.patchable ?? false) && !started && !model.bootBusy
+        let canStop = started && !model.bootBusy
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Button { } label: { Label("Patch…", systemImage: "bandage") }
+                    .disabled(true)
+                    .help("Guest patching arrives in the next slice.")
+                Button { model.bootSelected() } label: {
+                    Label("Boot (overlay)", systemImage: "play.fill")
+                }
+                .disabled(!canBoot)
+                Button { model.stopSelected() } label: {
+                    Label("Stop", systemImage: "stop.fill")
+                }
+                .disabled(!canStop)
+                Button { } label: { Label("Verify", systemImage: "checkmark.shield") }
+                    .disabled(true)
+                    .help("Kext-load verification arrives in a later slice.")
+                Spacer()
+                if model.bootBusy { ProgressView().controlSize(.small) }
+            }
+            HStack(spacing: 8) {
+                Circle().fill(model.overlayMounted ? Color.green : Color.secondary.opacity(0.5))
+                    .frame(width: 8, height: 8)
+                Text(model.overlayMounted ? "AVPBooter overlay mounted" : "overlay not mounted")
+                    .font(.caption).foregroundStyle(.secondary)
+                if model.overlayMounted {
+                    Button("Unmount") { model.unmountOverlay() }
+                        .buttonStyle(.link).font(.caption)
+                }
+            }
+        }
+    }
+
+    private var bootLogCard: some View {
+        GroupBox {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(model.bootLog.enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(4)
+            }
+            .frame(height: 140)
+        } label: {
+            Label("Activity", systemImage: "text.alignleft")
         }
     }
 

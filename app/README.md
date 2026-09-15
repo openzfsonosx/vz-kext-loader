@@ -36,7 +36,12 @@ VZKL_ENGINE_DIR=/path/to/vz-kext-loader/engine open VZKextLoader.app
   patchable/not-patchable classification; detail pane shows the selected VM's
   backend/OS/arch/bundle. Implemented. External VMs (e.g. on `/Volumes/NVMe`)
   are found by setting `VZKL_VM_SEARCH_PATHS=/Volumes/NVMe/VMs` (colon-separated).
-- Patch, Boot (with overlay), Verify: buttons present, wired in upcoming slices.
+- **Boot (with overlay)**: the app checks the overlay, and if absent builds a
+  patched-AVPBooter overlay (`vzkl overlay-build`, non-privileged) and mounts it
+  over the framework Resources via a macOS admin prompt (option 1), then starts
+  the VM (`utmctl`) and watches status. A **Stop** button and an **Unmount**
+  link (also admin-prompted) are provided, with a live Activity log. Implemented.
+- Patch (guest LLB/Preboot/Recovery), Verify (kext loaded): upcoming slices.
 
 ## Layout
 
