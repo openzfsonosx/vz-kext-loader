@@ -19,6 +19,25 @@ swift build
 .build/debug/VZKextLoader
 ```
 
+## Automation permission (UTM control) — important for development
+
+The app controls UTM via AppleEvents (start/stop/status). macOS gates that behind
+the **Automation** privacy permission. On current macOS the consent prompt is
+only presented for a **notarized** app — a Developer-ID-signed, hardened-runtime
+app with the `com.apple.security.automation.apple-events` entitlement (which this
+build has) still gets denied *without* a prompt.
+
+Until the app is notarized, run it from a terminal that already holds the UTM
+Automation grant, so the process inherits it:
+
+```sh
+cd app && swift run          # inherits the terminal's UTM automation grant
+```
+
+`open VZKextLoader.app` will work once the app is **notarized** (future).
+Mount/unmount use a separate mechanism (authorization) and already work from the
+bundle.
+
 ## Engine location
 
 The app runs the engine from `~/src/vz-kext-loader/engine` by default. Override
