@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let content = ContentView().environmentObject(model)
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 1040, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false

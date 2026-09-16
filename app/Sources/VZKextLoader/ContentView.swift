@@ -211,10 +211,12 @@ struct ContentView: View {
                     Label("Boot (overlay)", systemImage: "play.fill")
                 }
                 .disabled(!canBoot)
+                .help("Mount the patched-AVPBooter overlay (admin) and start the VM.")
                 Button { model.stopSelected() } label: {
                     Label("Stop", systemImage: "stop.fill")
                 }
                 .disabled(!canStop)
+                .help("Stop the running VM.")
                 Button { } label: { Label("Verify", systemImage: "checkmark.shield") }
                     .disabled(true)
                     .help("Kext-load verification arrives in a later slice.")
