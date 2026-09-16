@@ -160,7 +160,9 @@ final class AppModel: ObservableObject {
         let poller = startProgressTail(progressFile)
         Task.detached(priority: .userInitiated) {
             let argv = await MainActor.run { Engine.patchVMArgv(uuid: vm.uuid, unpatch: unpatch) }
-            let r = await MainActor.run { Privileged.run(argv) }
+            // Subprocess (not NSAppleScript) so the main thread stays free and
+            // the progress tailer can stream while this runs.
+            let r = Privileged.runViaSubprocess(argv)
             await MainActor.run {
                 poller.cancel()
                 self.handlePatchOutput(r, unpatch: unpatch)
