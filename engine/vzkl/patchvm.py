@@ -249,6 +249,21 @@ def _kc_path(root: str, guid_dir: str, nsih: str) -> str:
                         "com.apple.kernelcaches", "kernelcache")
 
 
+# The restore bundle (Preboot only) holds pristine THIRD copies of the boot
+# objects — a bare-IM4P iBoot/mBoot and kernelcache — plus a signed trustcache.
+# GG's startup-disk verification appears to repair the active objects from here,
+# reverting our patches; patch these too so a repair restores patched bytes.
+# These live under guid_dir/restore (not per-NSIH), so root/nsih are ignored;
+# the 3-arg signature matches _iboot_path/_kc_path for reuse in _DISK_ROLES.
+def _restore_iboot_path(root: str, guid_dir: str, nsih: str) -> str:
+    return os.path.join(guid_dir, "restore", "Firmware", "all_flash",
+                        "iBoot.vma2.RELEASE.im4p")
+
+
+def _restore_kc_path(root: str, guid_dir: str, nsih: str) -> str:
+    return os.path.join(guid_dir, "restore", "kernelcache.release.vma2")
+
+
 # --- patch step helpers ------------------------------------------------------
 
 def _backup_inplace(path: str) -> str:
@@ -312,8 +327,12 @@ def patch_vm(uuid: str) -> dict:
     disk = _find_os_disk(bundle)
     try:
         guid_dir, nsih = _active_nsih(disk["preboot_mnt"])
+        # iBoot's validate_boot_object call-site count varies by macOS version
+        # (1 on Ventura, 2 on Sonoma+/Tahoe). The patch is signature-anchored and
+        # exact-target, so patch whatever real callers exist rather than pinning a
+        # version-specific count; iboot.patch still refuses if it finds none.
         _patch_file(_iboot_path(disk["preboot_mnt"], guid_dir, nsih),
-                    lambda d: iboot.patch(d, expected_callers=2),
+                    iboot.patch,
                     entries, "preboot-iboot")
         _patch_file(_kc_path(disk["preboot_mnt"], guid_dir, nsih),
                     kernelcache.patch, entries, "preboot-kernelcache")
@@ -322,12 +341,23 @@ def patch_vm(uuid: str) -> dict:
         if rec:
             rmnt = rec["mountpoint"]                  # already mounted rw
             _patch_file(_iboot_path(rmnt, guid_dir, nsih),
-                        lambda d: iboot.patch(d, expected_callers=2),
+                        iboot.patch,
                         entries, "recovery-iboot")
             _patch_file(_kc_path(rmnt, guid_dir, nsih),
                         kernelcache.patch, entries, "recovery-kernelcache")
         else:
             entries.append({"role": "recovery", "state": "no-recovery-volume"})
+
+        # Restore-bundle third copies (Preboot only; bare IM4P). Absent on some
+        # versions — patch only if present.
+        r_ib = _restore_iboot_path(disk["preboot_mnt"], guid_dir, nsih)
+        r_kc = _restore_kc_path(disk["preboot_mnt"], guid_dir, nsih)
+        if os.path.exists(r_ib):
+            _patch_file(r_ib, iboot.patch, entries, "restore-iboot")
+        if os.path.exists(r_kc):
+            _patch_file(r_kc, kernelcache.patch, entries, "restore-kernelcache")
+        if not os.path.exists(r_ib) and not os.path.exists(r_kc):
+            entries.append({"role": "restore", "state": "no-restore-bundle"})
     finally:
         run(["sync"])
         _detach(disk["whole_dev"])
@@ -356,6 +386,8 @@ _DISK_ROLES = {
     "preboot-kernelcache": ("preboot", _kc_path),
     "recovery-iboot": ("recovery", _iboot_path),
     "recovery-kernelcache": ("recovery", _kc_path),
+    "restore-iboot": ("preboot", _restore_iboot_path),
+    "restore-kernelcache": ("preboot", _restore_kc_path),
 }
 
 

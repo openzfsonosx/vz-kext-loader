@@ -20,7 +20,9 @@ def patch(img4_bytes: bytes, expected_callers: int | None = None) -> tuple[bytes
     if expected_callers is not None and len(callers) != expected_callers:
         raise avpbooter.PatchError(
             f"iBoot: expected {expected_callers} callers, found {len(callers)}")
-    new_img4 = img4mod.rewrap(parsed, new_payload, compress=False)
+    # Preserve the original payload compression: uncompressed on 12–26 iBoot,
+    # LZFSE on 27's "mBoot". (compress=None = match the original.)
+    new_img4 = img4mod.rewrap(parsed, new_payload, compress=None)
     return new_img4, {
         "already_patched": False,
         "callers": callers,

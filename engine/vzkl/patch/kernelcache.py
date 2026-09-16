@@ -19,8 +19,16 @@ from . import img4 as img4mod
 NOP = bytes([0x1F, 0x20, 0x03, 0xD5])
 
 ACM_SYM = "__validate_acm_context"
-TARGET_FUNCS = ("__command_create_linked_manifest",
-                "__command_update_local_policy_for_kcos")
+# Each logical function whose ACM check we defeat, as newest-first name aliases.
+# macOS 27 (Golden Gate) moved these into the _boop_ namespace and dropped the
+# `command_` infix; __validate_acm_context itself keeps its name. First alias
+# present in the symbol table wins, so old and new kernelcaches both resolve.
+TARGET_FUNCS = (
+    ("__command_create_linked_manifest",        # macOS 12–26
+     "_boop_create_linked_manifest"),           # macOS 27+
+    ("__command_update_local_policy_for_kcos",  # macOS 12–26
+     "_boop_update_local_policy_for_kcos"),      # macOS 27+
+)
 
 _md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
 
@@ -53,22 +61,32 @@ def _funcs_by_paddr(symbols: list[dict]) -> list[tuple[int, int, str]]:
 
 
 def find_sites(payload: bytes, symbols: list[dict]) -> list[dict]:
-    """Locate the `bl __validate_acm_context` inside each target function."""
+    """Locate every `bl __validate_acm_context` inside each target function.
+
+    A function may hold more than one such call (GG's create_linked_manifest has
+    a primary site plus a retry before the __mdm_validate_acm_context fallback);
+    nop them all. Zero found on a target = already nopped (idempotent re-run).
+    Only calls to __validate_acm_context are matched, never the similarly named
+    __mdm_validate_acm_context (different symbol, different vaddr).
+    """
+    import bisect
     by_name = {s["name"]: s for s in symbols}
-    for name in (ACM_SYM, *TARGET_FUNCS):
-        if name not in by_name:
-            raise KcError(f"symbol {name} not found (kernelcache too new / stripped?)")
+    if ACM_SYM not in by_name:
+        raise KcError(f"symbol {ACM_SYM} not found (kernelcache too new / stripped?)")
     acm_vaddr = by_name[ACM_SYM]["vaddr"]
 
     funcs = _funcs_by_paddr(symbols)
     paddrs = [f[0] for f in funcs]
 
     sites = []
-    for fname in TARGET_FUNCS:
+    for aliases in TARGET_FUNCS:
+        fname = next((a for a in aliases if a in by_name), None)
+        if fname is None:
+            raise KcError(
+                f"none of {aliases} found (kernelcache too new / stripped?)")
         f = by_name[fname]
         fpaddr, fvaddr = f["paddr"], f["vaddr"]
         # size = distance to the next FUNC symbol (bounds the scan)
-        import bisect
         i = bisect.bisect_right(paddrs, fpaddr)
         end = paddrs[i] if i < len(paddrs) else fpaddr + 0x2000
         size = min(end - fpaddr, 0x4000)
@@ -79,15 +97,14 @@ def find_sites(payload: bytes, symbols: list[dict]) -> list[dict]:
                 # bl target = vaddr + imm; capstone gives it in op_str as #0x...
                 tgt = int(ins.op_str.lstrip("#"), 16)
                 if tgt == acm_vaddr:
-                    off = fpaddr + (ins.address - fvaddr)
-                    found.append(off)
-        # 1 = patch it; 0 = already nopped (idempotent re-run); >1 = ambiguous.
-        if len(found) > 1:
+                    found.append(fpaddr + (ins.address - fvaddr))
+        # >4 in one function is unexpected — refuse rather than guess.
+        if len(found) > 4:
             raise KcError(
-                f"{fname}: expected 1 bl to {ACM_SYM}, found {len(found)} "
+                f"{fname}: {len(found)} bl to {ACM_SYM}, refusing "
                 f"{[hex(x) for x in found]}")
-        if len(found) == 1:
-            sites.append({"func": fname, "offset": found[0]})
+        for off in found:
+            sites.append({"func": fname, "offset": off})
     return sites
 
 
