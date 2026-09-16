@@ -15,6 +15,7 @@ from . import __version__
 from . import checks
 from . import vms
 from . import overlay
+from . import patchvm
 
 
 def _print_checks_human(result: dict) -> None:
@@ -99,6 +100,29 @@ def cmd_vm(args) -> int:
     return 0 if result.get("ok") else 1
 
 
+def cmd_patch_vm(args) -> int:
+    fn = patchvm.unpatch_vm if args.unpatch else patchvm.patch_vm
+    try:
+        result = fn(args.uuid)
+    except Exception as e:  # noqa: BLE001
+        result = {"ok": False, "error": str(e)}
+    if args.json:
+        json.dump(result, sys.stdout); sys.stdout.write("\n")
+    else:
+        if result.get("ok"):
+            if args.unpatch:
+                print("restored:", len(result["restored"]), "file(s)")
+                for p_ in result["restored"]:
+                    print("  ", p_)
+            else:
+                print("patched", result["patched"], "file(s); manifest:", result["manifest"])
+                for e in result["entries"]:
+                    print("  ", e.get("role"), e.get("state"))
+        else:
+            print("failed:", result["error"])
+    return 0 if result.get("ok") else 1
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="vzkl", description="vz-kext-loader engine")
     p.add_argument("--version", action="version", version=f"vzkl {__version__}")
@@ -127,6 +151,13 @@ def main(argv=None) -> int:
     pm.add_argument("uuid")
     pm.add_argument("--json", action="store_true", help="Emit JSON")
     pm.set_defaults(func=cmd_vm)
+
+    pp = sub.add_parser("patch-vm",
+                        help="Patch (or --unpatch) a VM's guest boot chain; run as root")
+    pp.add_argument("uuid")
+    pp.add_argument("--unpatch", action="store_true", help="Restore originals from backups")
+    pp.add_argument("--json", action="store_true", help="Emit JSON")
+    pp.set_defaults(func=cmd_patch_vm)
 
     args = p.parse_args(argv)
     return args.func(args)
