@@ -151,10 +151,14 @@ struct ContentView: View {
         let canBoot = model.hostReady && (vm?.patchable ?? false) && !started && !model.bootBusy
         let canStop = started && !model.bootBusy
         return VStack(alignment: .leading, spacing: 8) {
+            let canPatch = (vm?.patchable ?? false) && !started && !model.bootBusy
             HStack(spacing: 12) {
-                Button { } label: { Label("Patch…", systemImage: "bandage") }
-                    .disabled(true)
-                    .help("Guest patching arrives in the next slice.")
+                Button { model.patchSelected() } label: { Label("Patch…", systemImage: "bandage") }
+                    .disabled(!canPatch)
+                    .help("Patch the guest boot chain (LLB, Preboot + Recovery iBoot/kernelcache). VM must be stopped.")
+                Button { model.patchSelected(unpatch: true) } label: { Label("Unpatch", systemImage: "arrow.uturn.backward") }
+                    .disabled(started || model.bootBusy)
+                    .help("Restore the originals from backup.")
                 Button { model.bootSelected() } label: {
                     Label("Boot (overlay)", systemImage: "play.fill")
                 }

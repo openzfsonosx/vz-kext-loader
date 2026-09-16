@@ -64,6 +64,22 @@ struct VMOp: Codable {
     var error: String?
 }
 
+struct PatchEntry: Codable, Hashable {
+    var role: String?
+    var state: String?
+    var path: String?
+}
+
+struct PatchVMResult: Codable {
+    var ok: Bool
+    var patched: Int?
+    var manifest: String?
+    var entries: [PatchEntry]?
+    var restored: [String]?
+    var missing_backups: [String]?
+    var error: String?
+}
+
 enum EngineError: LocalizedError {
     case engineNotFound(String)
     case launchFailed(String)
@@ -162,5 +178,32 @@ enum Engine {
 
     static func vmStatus(_ uuid: String) throws -> VMOp {
         try runJSON(["vm", "status", uuid], as: VMOp.self)
+    }
+
+    /// The user site-packages dir, so pyimg4/capstone import when the engine runs
+    /// as root (from an admin prompt). Empty string if it can't be determined.
+    static func userSitePackages() -> String {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: python)
+        proc.arguments = ["-m", "site", "--user-site"]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = Pipe()
+        do { try proc.run() } catch { return "" }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        return (String(data: data, encoding: .utf8) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// argv for running `vzkl patch-vm` (or --unpatch) as root, with PYTHONPATH
+    /// covering both the engine and the user site-packages. Run via Privileged.run.
+    static func patchVMArgv(uuid: String, unpatch: Bool) -> [String] {
+        let pyPath = engineDir + ":" + userSitePackages()
+        var args = ["/usr/bin/env", "PYTHONPATH=\(pyPath)", python,
+                    "-m", "vzkl", "patch-vm", uuid]
+        if unpatch { args.append("--unpatch") }
+        args.append("--json")
+        return args
     }
 }

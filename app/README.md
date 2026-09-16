@@ -60,7 +60,13 @@ VZKL_ENGINE_DIR=/path/to/vz-kext-loader/engine open VZKextLoader.app
   over the framework Resources via a macOS admin prompt (option 1), then starts
   the VM (`utmctl`) and watches status. A **Stop** button and an **Unmount**
   link (also admin-prompted) are provided, with a live Activity log. Implemented.
-- Patch (guest LLB/Preboot/Recovery), Verify (kext loaded): upcoming slices.
+- **Patch / Unpatch**: runs `vzkl patch-vm [--unpatch]` as root via one admin
+  prompt (PYTHONPATH set so pyimg4/capstone import under root). Patch applies the
+  guest chain (LLB in AuxiliaryStorage, main-OS Preboot iBoot+kernelcache, and
+  Recovery iBoot+kernelcache) to the *stopped* VM, keeping backups + a manifest;
+  Unpatch restores the originals. Implemented; full live run is the fresh-clone
+  replication test.
+- Verify (kext loaded): upcoming slice.
 
 ## Layout
 

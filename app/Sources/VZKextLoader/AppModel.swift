@@ -109,6 +109,48 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Patch (or unpatch) the selected VM's guest boot chain, as root via one
+    /// admin prompt. The VM must be stopped.
+    func patchSelected(unpatch: Bool = false) {
+        guard let vm = selectedVM, !bootBusy else { return }
+        guard !unpatch ? vm.patchable : true else { return }
+        if vm.status == "started" {
+            log("Stop \(vm.name) before \(unpatch ? "unpatching" : "patching") its disk.")
+            return
+        }
+        bootBusy = true
+        log("\(unpatch ? "Unpatching" : "Patching") \(vm.name)… (administrator required)")
+        Task.detached(priority: .userInitiated) {
+            let argv = await MainActor.run { Engine.patchVMArgv(uuid: vm.uuid, unpatch: unpatch) }
+            let r = await MainActor.run { Privileged.run(argv) }
+            await MainActor.run {
+                self.handlePatchOutput(r, unpatch: unpatch)
+                self.bootBusy = false
+                self.loadVMs()
+            }
+        }
+    }
+
+    private func handlePatchOutput(_ r: Privileged.Result, unpatch: Bool) {
+        guard r.ok, let data = r.output.data(using: .utf8),
+              let res = try? JSONDecoder().decode(PatchVMResult.self, from: data) else {
+            log("\(unpatch ? "Unpatch" : "Patch") failed: \(r.error ?? "no/invalid engine output")")
+            return
+        }
+        if !res.ok {
+            log("\(unpatch ? "Unpatch" : "Patch") failed: \(res.error ?? "unknown")")
+            return
+        }
+        if unpatch {
+            log("Restored \(res.restored?.count ?? 0) file(s) from backup.")
+        } else {
+            log("Patched \(res.patched ?? 0) file(s); backups + manifest saved.")
+            for e in res.entries ?? [] {
+                log("  \(e.role ?? "?") — \(e.state ?? "?")")
+            }
+        }
+    }
+
     /// Unmount the overlay (admin prompt). The overlay reverts on reboot anyway.
     func unmountOverlay() {
         Task.detached(priority: .userInitiated) {

@@ -120,6 +120,11 @@ def cmd_patch_vm(args) -> int:
                     print("  ", e.get("role"), e.get("state"))
         else:
             print("failed:", result["error"])
+    # In --json mode always exit 0 so an admin-osascript wrapper captures the
+    # JSON body (which carries "ok"); a non-zero exit would be seen as a failure
+    # and the output discarded.
+    if args.json:
+        return 0
     return 0 if result.get("ok") else 1
 
 
