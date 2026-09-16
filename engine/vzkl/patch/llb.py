@@ -52,45 +52,63 @@ def _next_retab(data: bytes, start: int) -> int | None:
     return None
 
 
-def _mov_x0_before(data: bytes, retab_off: int, window: int = 24) -> int | None:
-    """Walk backward from the retab to the return-value `mov x0, x<N>`."""
+def _return_mov_before(data: bytes, retab_off: int, window: int = 24):
+    """Walk backward from the retab to the return-value `mov x0, …`.
+
+    Returns (offset, already_patched):
+      * `mov x0, x<N>`  -> (offset, False)  — the site to patch
+      * `mov x0, #0`    -> (offset, True)   — already patched
+      * neither found   -> None             — genuine failure (raise upstream)
+    """
     off = retab_off - 4
     steps = 0
     while off > 0 and steps < window:
         ins = _decode1(data, off)
-        if ins and ins.mnemonic == "mov" and ins.op_str.replace(" ", "").startswith("x0,x"):
-            return off
+        if ins and ins.mnemonic == "mov":
+            op = ins.op_str.replace(" ", "")
+            if op.startswith("x0,x"):
+                return off, False
+            if op in ("x0,#0", "x0,#0x0"):
+                return off, True
         off -= 4
         steps += 1
     return None
 
 
 def find_site(payload: bytes) -> dict:
-    """Locate the patch site. Returns {site, retab, dgst_loads, insn}."""
+    """Locate the patch site. Returns {site, retab, dgst_loads, insn, already_patched}.
+
+    Raises PatchError only for a genuine structural failure (not an image4
+    validator, or an unrecognized epilogue) — NOT for an already-patched LLB,
+    which is reported via already_patched=True so callers never silently skip a
+    patch they actually needed to apply.
+    """
     dgst = _find_dgst_loads(payload)
     if not dgst:
         raise PatchError("DGST constant not found; not an LLB image4 validator?")
     retab = _next_retab(payload, max(dgst) + 4)
     if retab is None:
         raise PatchError("no retab epilogue after the DGST loads")
-    site = _mov_x0_before(payload, retab)
-    if site is None:
-        raise PatchError("could not find the return `mov x0, xN` before the epilogue")
+    found = _return_mov_before(payload, retab)
+    if found is None:
+        raise PatchError("could not find the return `mov x0, …` before the epilogue")
+    site, already = found
     ins = _decode1(payload, site)
     return {
         "site": site,
         "retab": retab,
         "dgst_loads": dgst,
         "insn": f"{ins.mnemonic} {ins.op_str}",
+        "already_patched": already,
     }
 
 
 def patch(payload: bytes) -> tuple[bytes, dict]:
-    """Return (patched_payload, info). Idempotent-ish: if the site is already
-    `mov x0, #0` we still return it (find_site would fail to find a `mov x0, xN`,
-    so callers should treat a PatchError after a successful prior patch as
-    already-patched)."""
+    """Return (patched_payload, info). If already patched, returns unchanged with
+    info['already_patched']=True. Raises PatchError on a genuine failure."""
     info = find_site(payload)
+    if info["already_patched"]:
+        return payload, info
     buf = bytearray(payload)
     buf[info["site"]:info["site"] + 4] = MOV_X0_0
     return bytes(buf), info

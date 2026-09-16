@@ -64,12 +64,10 @@ def patch(aux_bytes: bytes) -> tuple[bytes, dict]:
     logo = bytes(aux[logo_off:logo_off + logo_len])
 
     parsed = img4mod.parse(bytes(aux[O:O + total]))
-    try:
-        new_payload, site = llbmod.patch(parsed.payload)
-    except llbmod.PatchError:
-        # No `mov x0, xN` return found -> already patched (mov x0,#0), or a
-        # different build. Treat as already-patched only if the payload has the
-        # DGST loads (i.e. it IS the validator) but no return mov.
+    # llbmod.patch raises PatchError on a genuine failure (so we never silently
+    # ship an unpatched LLB) and flags an already-patched LLB explicitly.
+    new_payload, site = llbmod.patch(parsed.payload)
+    if site.get("already_patched"):
         return bytes(aux), {"llb_offset": O, "already_patched": True}
 
     new_llb = img4mod.rewrap(parsed, new_payload, compress=False)
