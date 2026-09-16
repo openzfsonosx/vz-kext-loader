@@ -48,6 +48,7 @@ class VM:
     aux_path: str = ""
     patchable: bool = False
     reason: str = ""            # why not patchable, if applicable
+    has_backup: bool = False    # a vz-kext-loader backup manifest exists (i.e. patched)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -102,6 +103,9 @@ def _parse_bundle(bundle: str) -> Optional[VM]:
         vm.aux_path = cand
     elif os.path.exists(os.path.join(data_dir, "AuxiliaryStorage")):
         vm.aux_path = os.path.join(data_dir, "AuxiliaryStorage")
+
+    manifest = os.path.join(data_dir, ".vzkl-backup", "manifest.json")
+    vm.has_backup = os.path.exists(manifest)
 
     _classify(vm)
     return vm

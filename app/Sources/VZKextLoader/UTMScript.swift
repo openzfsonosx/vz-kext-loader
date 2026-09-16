@@ -65,8 +65,10 @@ enum UTMScript {
     }
 
     @MainActor
-    static func start(_ uuid: String) -> Outcome {
-        runAppleScript("tell application \"UTM\" to start virtual machine id \"\(uuid)\"")
+    static func start(_ uuid: String, recovery: Bool = false) -> Outcome {
+        let rec = recovery ? " with recovery" : ""
+        return runAppleScript(
+            "tell application \"UTM\" to start virtual machine id \"\(uuid)\"\(rec)")
     }
 
     @MainActor

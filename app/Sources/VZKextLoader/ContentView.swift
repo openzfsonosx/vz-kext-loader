@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
@@ -43,6 +44,32 @@ struct ContentView: View {
                 ProgressView("Scanning VMs…")
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 2) {
+                Button {
+                    if let dir = pickDirectory() { model.addSearchPath(dir) }
+                } label: {
+                    Label("Add VM folder…", systemImage: "folder.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .help("Add a directory to scan for .utm bundles (e.g. an external volume).")
+                if !model.extraSearchPaths.isEmpty {
+                    Text("+\(model.extraSearchPaths.count) extra folder(s)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private func pickDirectory() -> String? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add"
+        panel.message = "Choose a folder that contains .utm VM bundles"
+        return panel.runModal() == .OK ? panel.url?.path : nil
     }
 
     // MARK: Detail
@@ -128,6 +155,22 @@ struct ContentView: View {
                     if !vm.patchable && !vm.reason.isEmpty {
                         Text(vm.reason).font(.callout).foregroundStyle(.secondary)
                     }
+                    if vm.patchable {
+                        if vm.has_backup == true {
+                            Label("Patched — backup on record (Unpatch to revert)",
+                                  systemImage: "checkmark.seal.fill")
+                                .font(.caption).foregroundStyle(.green)
+                        } else {
+                            HStack(alignment: .top, spacing: 6) {
+                                Image(systemName: "info.circle")
+                                Text("First-time setup: boot to **Recovery**, set **Permissive** (“allow booting unsigned OS”), then disable **SIP** and **Authenticated Root**. The host can’t verify this state, so do it once before patching.")
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
+                            .padding(6)
+                            .background(Color.secondary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+                    }
                     Divider()
                     infoRow("UUID", vm.uuid)
                     if !vm.backend.isEmpty { infoRow("Backend", vm.backend) }
@@ -152,13 +195,18 @@ struct ContentView: View {
         let canStop = started && !model.bootBusy
         return VStack(alignment: .leading, spacing: 8) {
             let canPatch = (vm?.patchable ?? false) && !started && !model.bootBusy
+            let hasBackup = vm?.has_backup ?? false
             HStack(spacing: 12) {
+                Button { model.bootRecovery() } label: { Label("Recovery…", systemImage: "lifepreserver") }
+                    .disabled(started || model.bootBusy || !(vm?.os == "macOS"))
+                    .help("Boot into Recovery for the one-time security setup (Permissive, disable SIP & Authenticated Root).")
                 Button { model.patchSelected() } label: { Label("Patch…", systemImage: "bandage") }
                     .disabled(!canPatch)
                     .help("Patch the guest boot chain (LLB, Preboot + Recovery iBoot/kernelcache). VM must be stopped.")
                 Button { model.patchSelected(unpatch: true) } label: { Label("Unpatch", systemImage: "arrow.uturn.backward") }
-                    .disabled(started || model.bootBusy)
-                    .help("Restore the originals from backup.")
+                    .disabled(!hasBackup || started || model.bootBusy)
+                    .help(hasBackup ? "Restore the originals from backup."
+                                    : "No backup on record for this VM.")
                 Button { model.bootSelected() } label: {
                     Label("Boot (overlay)", systemImage: "play.fill")
                 }

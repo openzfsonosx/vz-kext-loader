@@ -66,6 +66,15 @@ VZKL_ENGINE_DIR=/path/to/vz-kext-loader/engine open VZKextLoader.app
   Recovery iBoot+kernelcache) to the *stopped* VM, keeping backups + a manifest;
   Unpatch restores the originals. Implemented; full live run is the fresh-clone
   replication test.
+- **Recovery boot**: a Recovery button boots the selected macOS VM into Recovery
+  (via UTM's scripting `recovery` flag) for the one-time security setup.
+- **Add VM folder**: the sidebar has an "Add VM folder…" picker to scan external
+  locations (e.g. `/Volumes/NVMe/VMs`) for `.utm` bundles; the choice is persisted
+  and passed to the engine as `VZKL_VM_SEARCH_PATHS`.
+- **Unpatch gating + patched indicator**: Unpatch is enabled only when a backup
+  manifest exists for the VM; a patched VM shows a "backup on record" badge.
+- **Setup reminder**: a patchable-but-unpatched VM shows the Recovery security
+  prerequisites (the host can't read the guest's SIP/Permissive state).
 - Verify (kext loaded): upcoming slice.
 
 ## Layout

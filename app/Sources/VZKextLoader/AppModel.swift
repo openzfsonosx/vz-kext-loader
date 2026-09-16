@@ -95,6 +95,41 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Boot the selected VM into Recovery (for the one-time security setup:
+    /// Permissive + disable SIP & Authenticated Root). No overlay needed — this
+    /// is the pre-patch step on a stock VM.
+    func bootRecovery() {
+        guard let vm = selectedVM, !bootBusy else { return }
+        guard vm.status != "started" else { log("Stop \(vm.name) first."); return }
+        bootBusy = true
+        log("Booting \(vm.name) into Recovery…")
+        Task.detached(priority: .userInitiated) {
+            let s = await MainActor.run { UTMScript.start(vm.uuid, recovery: true) }
+            await MainActor.run {
+                self.log(s.ok ? "Recovery boot issued. In Startup Security Utility: set Permissive, then disable SIP and Authenticated Root."
+                              : "Recovery boot failed: \(s.error ?? "unknown")")
+                self.bootBusy = false
+                self.loadVMs()
+            }
+        }
+    }
+
+    // Extra VM search directories (for VMs outside ~/Library/.../Documents,
+    // e.g. on an external volume). Persisted; passed to the engine as
+    // VZKL_VM_SEARCH_PATHS.
+    var extraSearchPaths: [String] {
+        UserDefaults.standard.stringArray(forKey: "extraSearchPaths") ?? []
+    }
+
+    func addSearchPath(_ path: String) {
+        var paths = extraSearchPaths
+        guard !path.isEmpty, !paths.contains(path) else { return }
+        paths.append(path)
+        UserDefaults.standard.set(paths, forKey: "extraSearchPaths")
+        log("Added VM search path: \(path)")
+        loadVMs()
+    }
+
     func stopSelected() {
         guard let vm = selectedVM, !bootBusy else { return }
         bootBusy = true

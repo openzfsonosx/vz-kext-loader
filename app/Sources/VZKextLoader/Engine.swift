@@ -28,6 +28,7 @@ struct VMItem: Codable, Identifiable, Hashable {
     var aux_path: String
     var patchable: Bool
     var reason: String
+    var has_backup: Bool?
 
     var id: String { uuid }
 }
@@ -124,6 +125,11 @@ enum Engine {
         // sane PATH so r2/utmctl resolve.
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
+        // Extra VM search directories the user added (persisted).
+        let extra = UserDefaults.standard.stringArray(forKey: "extraSearchPaths") ?? []
+        if !extra.isEmpty {
+            env["VZKL_VM_SEARCH_PATHS"] = extra.joined(separator: ":")
+        }
         proc.environment = env
 
         let out = Pipe()
