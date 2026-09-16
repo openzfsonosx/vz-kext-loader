@@ -78,8 +78,13 @@ def _plist(text: str):
     return plistlib.loads(text.encode()) if text.strip() else {}
 
 
-def _attach_raw(img: str) -> tuple[str, str | None]:
-    """Attach a raw UTM disk image without mounting. Return (whole_dev, apfs_part)."""
+def _attach_raw(img: str) -> tuple[str, list[str]]:
+    """Attach a raw UTM disk image without mounting. Return (whole_dev, apfs_parts).
+
+    apfs_parts is every APFS-bearing partition on the image (main, ISC, recovery);
+    the caller checks each container for the one with a Preboot volume, since the
+    system-entities order is not deterministic.
+    """
     cp = run(["hdiutil", "attach", "-nobrowse", "-nomount", "-noverify",
               "-imagekey", "diskimage-class=CRawDiskImage", "-plist", img],
              timeout=180)
@@ -88,13 +93,13 @@ def _attach_raw(img: str) -> tuple[str, str | None]:
     ents = _plist(cp.stdout).get("system-entities", [])
     whole = next((e["dev-entry"] for e in ents
                   if e.get("content-hint") == "GUID_partition_scheme"), None)
-    apfs = next((e["dev-entry"] for e in ents
-                 if e.get("content-hint") in ("Apple_APFS", "Apple_APFS_Recovery")), None)
+    apfs_parts = [e["dev-entry"] for e in ents
+                  if str(e.get("content-hint", "")).startswith("Apple_APFS")]
     if not whole:
         whole = ents[0]["dev-entry"] if ents else None
     if not whole:
         raise PatchVMError("attach produced no devices")
-    return whole, apfs
+    return whole, apfs_parts
 
 
 def _detach(dev: str) -> None:
@@ -148,15 +153,19 @@ def _find_os_disk(bundle_path: str) -> dict:
             f"diskutil={__import__('shutil').which('diskutil')}",
             f"imgs={[os.path.basename(i) for i in imgs]}"]
     for img in sorted(imgs, key=os.path.getsize, reverse=True):
-        whole, apfs = _attach_raw(img)
-        _cp = run(["diskutil", "apfs", "list", "-plist"])
-        _d = _plist(_cp.stdout)
-        _ncont = len(_d.get("Containers", []))
-        vols = _volumes_on(apfs)
-        diag.append(f"{os.path.basename(img)}: whole={whole} apfs={apfs} "
-                    f"diskutil_rc={_cp.returncode} containers={_ncont} "
-                    f"roles={list(vols.keys())}")
-        if "Preboot" in vols:
+        whole, apfs_parts = _attach_raw(img)
+        # Pick the MAIN OS container: it has Preboot AND Data AND System. (The
+        # iSC/SEP container also exposes a "Preboot" role but no Data; the
+        # recovery container has Recovery but no Preboot.)
+        vols, chosen = {}, None
+        for part in apfs_parts:
+            v = _volumes_on(part)
+            if "Preboot" in v and "Data" in v and "System" in v:
+                vols, chosen = v, part
+                break
+        diag.append(f"{os.path.basename(img)}: whole={whole} apfs_parts={apfs_parts} "
+                    f"chosen={chosen} roles={list(vols.keys())}")
+        if vols:
             preboot_mnt = _mount(vols["Preboot"], rw=True)
             # Safety: never operate on the host's live volumes.
             if preboot_mnt.startswith("/System/Volumes"):
