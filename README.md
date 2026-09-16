@@ -351,3 +351,14 @@ boot log:            bootpolicy_get_linked_manifest: success; loaded auxiliary k
   [utmapp/UTM#4026](https://github.com/utmapp/UTM/issues/4026).
 - This repo: from-scratch reproduction, per-anchor robustness analysis, and the
   recovery-boot-chain finding, developed against the OpenZFS on macOS `zfs.kext`.
+
+---
+
+## Screenshots
+
+The companion host app (`app/`) — host requirements check, UTM VM discovery with
+patchable classification, and boot-with-overlay orchestration.
+
+![vz-kext-loader — VM list and host summary](img/vz-kext-loader1.jpg)
+
+![vz-kext-loader — host requirements detail](img/vz-kext-loader2.jpg)
