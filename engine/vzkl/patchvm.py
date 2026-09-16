@@ -98,12 +98,19 @@ def _mountpoint(dev: str) -> str | None:
 
 
 def _volumes_on(apfs_part: str) -> dict:
-    """Return {role: device_id} for volumes in the container on `apfs_part`."""
+    """Return {role: device_id} for volumes in the APFS container whose physical
+    store is `apfs_part` (the just-attached image partition).
+
+    Matching by physical store is a hard safety requirement: the host's own disk
+    also has Preboot/Recovery/Data volumes, and we must never touch it.
+    """
     d = _plist(run(["diskutil", "apfs", "list", "-plist"]).stdout)
     part = (apfs_part or "").replace("/dev/", "")
+    if not part:
+        return {}
     for cont in d.get("Containers", []):
-        stores = [s.get("DeviceIdentifier") for s in cont.get("APFSPhysicalStores", [])]
-        if part and part in stores:
+        stores = [s.get("DeviceIdentifier") for s in cont.get("PhysicalStores", [])]
+        if part in stores:
             out = {}
             for v in cont.get("Volumes", []):
                 for role in (v.get("Roles") or ["Data"]):
@@ -132,6 +139,11 @@ def _find_os_disk(bundle_path: str) -> dict:
         vols = _volumes_on(apfs)
         if "Preboot" in vols:
             preboot_mnt = _mount(vols["Preboot"], rw=True)
+            # Safety: never operate on the host's live volumes.
+            if preboot_mnt.startswith("/System/Volumes"):
+                _detach(whole)
+                raise PatchVMError(
+                    f"refusing to patch: Preboot mounted at host path {preboot_mnt}")
             recovery = None
             if "Recovery" in vols:
                 recovery = {"dev": vols["Recovery"],
