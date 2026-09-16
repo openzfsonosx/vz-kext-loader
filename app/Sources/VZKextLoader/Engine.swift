@@ -206,9 +206,14 @@ enum Engine {
     /// covering both the engine and the user site-packages, and the same extra VM
     /// search paths the app uses (so root can locate a VM on an external volume).
     /// Run via Privileged.run.
+    static func progressPath(uuid: String) -> String {
+        NSTemporaryDirectory() + "vzkl-\(uuid).progress"
+    }
+
     static func patchVMArgv(uuid: String, unpatch: Bool) -> [String] {
         let pyPath = engineDir + ":" + userSitePackages()
-        var args = ["/usr/bin/env", "PYTHONPATH=\(pyPath)"]
+        var args = ["/usr/bin/env", "PYTHONPATH=\(pyPath)",
+                    "VZKL_PROGRESS_FILE=\(progressPath(uuid: uuid))"]
         let extra = UserDefaults.standard.stringArray(forKey: "extraSearchPaths") ?? []
         if !extra.isEmpty {
             args.append("VZKL_VM_SEARCH_PATHS=\(extra.joined(separator: ":"))")

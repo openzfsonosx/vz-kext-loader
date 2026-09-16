@@ -155,13 +155,37 @@ final class AppModel: ObservableObject {
         }
         bootBusy = true
         log("\(unpatch ? "Unpatching" : "Patching") \(vm.name)… (administrator required)")
+        let progressFile = Engine.progressPath(uuid: vm.uuid)
+        try? "".write(toFile: progressFile, atomically: true, encoding: .utf8)
+        let poller = startProgressTail(progressFile)
         Task.detached(priority: .userInitiated) {
             let argv = await MainActor.run { Engine.patchVMArgv(uuid: vm.uuid, unpatch: unpatch) }
             let r = await MainActor.run { Privileged.run(argv) }
             await MainActor.run {
+                poller.cancel()
                 self.handlePatchOutput(r, unpatch: unpatch)
                 self.bootBusy = false
                 self.loadVMs()
+            }
+        }
+    }
+
+    /// Tail the engine's progress file and log new lines live while the single
+    /// privileged patch call is blocked. Returns a cancellable task.
+    private func startProgressTail(_ path: String) -> Task<Void, Never> {
+        Task { [weak self] in
+            var shown = 0
+            while !Task.isCancelled {
+                if let text = try? String(contentsOfFile: path, encoding: .utf8) {
+                    let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+                    if lines.count > shown {
+                        for line in lines[shown...] {
+                            self?.log("  " + line)
+                        }
+                        shown = lines.count
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 400_000_000)
             }
         }
     }

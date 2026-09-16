@@ -33,6 +33,20 @@ class PatchVMError(Exception):
     pass
 
 
+def _progress(msg: str) -> None:
+    """Append a progress line to VZKL_PROGRESS_FILE (if set) so the app can tail
+    it live while the single privileged patch-vm call is still running."""
+    path = os.environ.get("VZKL_PROGRESS_FILE")
+    if not path:
+        return
+    try:
+        with open(path, "a") as f:
+            f.write(msg + "\n")
+            f.flush()
+    except OSError:
+        pass
+
+
 def _ensure_path() -> None:
     """When run as root via an admin prompt, PATH is minimal and omits /usr/sbin
     (diskutil), /sbin (mount) and the Homebrew dirs (r2). Ensure they're present
@@ -218,6 +232,7 @@ def _backup_inplace(path: str) -> str:
 def _patch_file(path: str, patch_fn, entries: list, role: str,
                 backup_path: str | None = None) -> None:
     """Backup `path`, patch it with patch_fn(bytes)->(bytes,info), record entry."""
+    _progress(f"patching {role}…")
     orig_sha = _sha(path)
     bak = backup_path or _backup_inplace(path)
     data = open(path, "rb").read()
@@ -264,6 +279,7 @@ def patch_vm(uuid: str) -> dict:
     _patch_file(aux, auxstorage.patch, entries, "auxstorage", backup_path=aux_bak)
 
     # 2-3) Preboot + Recovery, via the attached OS disk
+    _progress("attaching disk image…")
     disk = _find_os_disk(bundle)
     try:
         guid_dir, nsih = _active_nsih(disk["preboot_mnt"])
