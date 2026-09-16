@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
+        if let icon = Self.loadAppIcon() { NSApp.applicationIconImage = icon }
         let content = ContentView().environmentObject(model)
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1040, height: 680),
@@ -58,25 +59,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = main
     }
 
+    /// Load the app icon from the bundle (.app) or, under `swift run`, from the
+    /// repo's app/ directory, so the Dock icon shows in both.
+    static func loadAppIcon() -> NSImage? {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let img = NSImage(contentsOf: url) { return img }
+        let candidates = ["AppIcon.icns",
+                          NSHomeDirectory() + "/src/vz-kext-loader/app/AppIcon.icns"]
+        for p in candidates where FileManager.default.fileExists(atPath: p) {
+            if let img = NSImage(contentsOfFile: p) { return img }
+        }
+        return nil
+    }
+
     @objc private func showAbout() {
         let version = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.1.0"
         let credits = NSMutableAttributedString()
-        func line(_ s: String, bold: Bool = false, size: CGFloat = 11) {
+        func para(_ s: String, bold: Bool = false, size: CGFloat = 11) {
             let font = bold ? NSFont.boldSystemFont(ofSize: size) : NSFont.systemFont(ofSize: size)
-            let para = NSMutableParagraphStyle(); para.alignment = .center
+            let p = NSMutableParagraphStyle()
+            p.alignment = .center
+            p.paragraphSpacing = 7
             credits.append(NSAttributedString(string: s + "\n",
-                attributes: [.font: font, .paragraphStyle: para,
+                attributes: [.font: font, .paragraphStyle: p,
                              .foregroundColor: NSColor.labelColor]))
         }
-        line("Load third-party kexts in UTM / Virtualization.framework")
-        line("macOS guests, for per-version testing.")
-        line(" ")
-        line("Method by Steven Michaud and the utmapp/UTM #4026", bold: true)
-        line("discussion (with thanks to dariaphoebe).")
-        line(" ")
-        line("Built by Joergen Lundman with Claude (Anthropic).")
-        line(" ")
-        line("github.com/openzfsonosx/vz-kext-loader", size: 10)
+        para("Load third-party kexts in UTM / Virtualization.framework macOS guests, for per-version testing.")
+        para("Method by Steven Michaud and the UTM #4026 discussion (thanks dariaphoebe).", bold: true)
+        para("Built by Joergen Lundman with Claude (Anthropic).")
+        para("github.com/openzfsonosx/vz-kext-loader", size: 10)
 
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "vz-kext-loader",
