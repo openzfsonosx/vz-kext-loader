@@ -57,48 +57,88 @@ def _backup_dir(bundle_path: str) -> str:
 
 
 # --- disk image attach / volume discovery -----------------------------------
+#
+# UTM disk images are RAW (no .dmg wrapper), so hdiutil needs
+# diskimage-class=CRawDiskImage or it prompts "there may be a problem with this
+# disk image". We attach with -nomount so the FileVault-encrypted Data volume is
+# never touched, then mount only Preboot and Recovery (both unencrypted).
 
-def _attach(img: str) -> list[dict]:
-    """Attach a disk image (no auto-mount browsing); return its entities."""
-    cp = run(["hdiutil", "attach", "-nobrowse", "-plist", img], timeout=120)
-    if cp.returncode != 0:
-        raise PatchVMError(f"hdiutil attach failed: {cp.stderr.strip()}")
+def _plist(text: str):
     import plistlib
-    info = plistlib.loads(cp.stdout.encode())
-    ents = []
-    for e in info.get("system-entities", []):
-        ents.append({"dev": e.get("dev-entry"),
-                     "mountpoint": e.get("mount-point"),
-                     "content": e.get("content-hint", "")})
-    return ents
+    return plistlib.loads(text.encode()) if text.strip() else {}
+
+
+def _attach_raw(img: str) -> tuple[str, str | None]:
+    """Attach a raw UTM disk image without mounting. Return (whole_dev, apfs_part)."""
+    cp = run(["hdiutil", "attach", "-nobrowse", "-nomount", "-noverify",
+              "-imagekey", "diskimage-class=CRawDiskImage", "-plist", img],
+             timeout=180)
+    if cp.returncode != 0:
+        raise PatchVMError(f"hdiutil attach failed: {cp.stderr.strip() or cp.stdout.strip()}")
+    ents = _plist(cp.stdout).get("system-entities", [])
+    whole = next((e["dev-entry"] for e in ents
+                  if e.get("content-hint") == "GUID_partition_scheme"), None)
+    apfs = next((e["dev-entry"] for e in ents
+                 if e.get("content-hint") in ("Apple_APFS", "Apple_APFS_Recovery")), None)
+    if not whole:
+        whole = ents[0]["dev-entry"] if ents else None
+    if not whole:
+        raise PatchVMError("attach produced no devices")
+    return whole, apfs
 
 
 def _detach(dev: str) -> None:
     run(["hdiutil", "detach", dev, "-force"], timeout=60)
 
 
-def _find_os_disk(bundle_path: str):
-    """Attach candidate images; return (whole_dev, preboot_mnt, recovery_dev,
-    recovery_mnt_or_None) for the image that has a Preboot + Recovery volume."""
+def _mountpoint(dev: str) -> str | None:
+    info = _plist(run(["diskutil", "info", "-plist", dev]).stdout)
+    mp = info.get("MountPoint")
+    return mp or None
+
+
+def _volumes_on(apfs_part: str) -> dict:
+    """Return {role: device_id} for volumes in the container on `apfs_part`."""
+    d = _plist(run(["diskutil", "apfs", "list", "-plist"]).stdout)
+    part = (apfs_part or "").replace("/dev/", "")
+    for cont in d.get("Containers", []):
+        stores = [s.get("DeviceIdentifier") for s in cont.get("APFSPhysicalStores", [])]
+        if part and part in stores:
+            out = {}
+            for v in cont.get("Volumes", []):
+                for role in (v.get("Roles") or ["Data"]):
+                    out.setdefault(role, v["DeviceIdentifier"])
+            return out
+    return {}
+
+
+def _mount(dev_id: str, rw: bool) -> str:
+    dev = "/dev/" + dev_id
+    run(["diskutil", "mount", dev])
+    mp = _mountpoint(dev)
+    if not mp:
+        raise PatchVMError(f"could not mount {dev}")
+    if rw:
+        run(["mount", "-u", "-o", "rw", mp])
+    return mp
+
+
+def _find_os_disk(bundle_path: str) -> dict:
+    """Attach the OS disk image and mount Preboot (rw) + Recovery (rw)."""
     data = os.path.join(bundle_path, "Data")
     imgs = [os.path.join(data, f) for f in os.listdir(data) if f.endswith(".img")]
     for img in sorted(imgs, key=os.path.getsize, reverse=True):
-        ents = _attach(img)
-        preboot = next((e for e in ents if e["mountpoint"]
-                        and os.path.basename(e["mountpoint"]) == "Preboot"), None)
-        recovery = next((e for e in ents if e["mountpoint"]
-                         and os.path.basename(e["mountpoint"]) == "Recovery"), None)
-        if preboot:
-            whole = next((e["dev"] for e in ents
-                          if e["content"] == "GUID_partition_scheme"), ents[0]["dev"])
-            return {"img": img, "whole_dev": whole, "ents": ents,
-                    "preboot_mnt": preboot["mountpoint"],
-                    "recovery": recovery}
-        # not the OS disk; detach and try next
-        whole = next((e["dev"] for e in ents
-                      if e["content"] == "GUID_partition_scheme"), None)
-        if whole:
-            _detach(whole)
+        whole, apfs = _attach_raw(img)
+        vols = _volumes_on(apfs)
+        if "Preboot" in vols:
+            preboot_mnt = _mount(vols["Preboot"], rw=True)
+            recovery = None
+            if "Recovery" in vols:
+                recovery = {"dev": vols["Recovery"],
+                            "mountpoint": _mount(vols["Recovery"], rw=True)}
+            return {"img": img, "whole_dev": whole,
+                    "preboot_mnt": preboot_mnt, "recovery": recovery}
+        _detach(whole)
     raise PatchVMError("no disk image with a Preboot volume found")
 
 
@@ -193,8 +233,7 @@ def patch_vm(uuid: str) -> dict:
 
         rec = disk["recovery"]
         if rec:
-            rmnt = rec["mountpoint"]
-            run(["mount", "-u", "-o", "rw", rmnt])   # Recovery mounts ro
+            rmnt = rec["mountpoint"]                  # already mounted rw
             _patch_file(_iboot_path(rmnt, guid_dir, nsih),
                         lambda d: iboot.patch(d, expected_callers=2),
                         entries, "recovery-iboot")
@@ -259,8 +298,6 @@ def unpatch_vm(uuid: str) -> dict:
         try:
             guid_dir, live_nsih = _active_nsih(disk["preboot_mnt"])
             use_nsih = nsih or live_nsih
-            if disk["recovery"]:
-                run(["mount", "-u", "-o", "rw", disk["recovery"]["mountpoint"]])
             roots = {"preboot": disk["preboot_mnt"],
                      "recovery": disk["recovery"]["mountpoint"] if disk["recovery"] else None}
             for role in disk_roles:
