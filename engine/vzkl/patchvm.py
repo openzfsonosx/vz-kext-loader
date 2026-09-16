@@ -33,6 +33,16 @@ class PatchVMError(Exception):
     pass
 
 
+def _ensure_path() -> None:
+    """When run as root via an admin prompt, PATH is minimal and omits /usr/sbin
+    (diskutil), /sbin (mount) and the Homebrew dirs (r2). Ensure they're present
+    so every tool resolves regardless of how we were launched."""
+    need = ["/usr/bin", "/bin", "/usr/sbin", "/sbin",
+            "/usr/local/bin", "/opt/homebrew/bin"]
+    have = os.environ.get("PATH", "").split(":")
+    os.environ["PATH"] = ":".join(have + [d for d in need if d not in have])
+
+
 def _sha(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -219,6 +229,7 @@ def _jsonable(info: dict) -> dict:
 # --- top-level orchestration -------------------------------------------------
 
 def patch_vm(uuid: str) -> dict:
+    _ensure_path()
     vm = _bundle(uuid)
     if vm.get("status") == "started":
         raise PatchVMError("VM is running; stop it before patching its disk")
@@ -282,6 +293,7 @@ _DISK_ROLES = {
 def unpatch_vm(uuid: str) -> dict:
     """Restore every original from its backup. Disk paths are reconstructed from
     the freshly-attached disk (mountpoints differ from patch time)."""
+    _ensure_path()
     vm = _bundle(uuid)
     if vm.get("status") == "started":
         raise PatchVMError("VM is running; stop it before unpatching")
