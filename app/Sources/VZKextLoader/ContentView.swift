@@ -24,6 +24,9 @@ struct ContentView: View {
         .onAppear {
             if model.checks.isEmpty { model.refreshAll() }
         }
+        .onChange(of: model.selectedVMID) { _ in
+            model.refreshSelectedStatus()
+        }
     }
 
     // MARK: Sidebar — VM list
@@ -144,7 +147,10 @@ struct ContentView: View {
                         StatusBadge(status: vm.status)
                         Text(vm.name).font(.title3).bold()
                         Spacer()
-                        if vm.patchable {
+                        if vm.has_backup == true {
+                            Label("Patched", systemImage: "checkmark.seal.fill")
+                                .foregroundStyle(.blue).font(.callout)
+                        } else if vm.patchable {
                             Label("Patchable", systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green).font(.callout)
                         } else {
@@ -159,7 +165,7 @@ struct ContentView: View {
                         if vm.has_backup == true {
                             Label("Patched — backup on record (Unpatch to revert)",
                                   systemImage: "checkmark.seal.fill")
-                                .font(.caption).foregroundStyle(.green)
+                                .font(.caption).foregroundStyle(.blue)
                         } else {
                             HStack(alignment: .top, spacing: 6) {
                                 Image(systemName: "info.circle")
@@ -200,9 +206,13 @@ struct ContentView: View {
                 Button { model.bootRecovery() } label: { Label("Recovery…", systemImage: "lifepreserver") }
                     .disabled(started || model.bootBusy || !(vm?.os == "macOS"))
                     .help("Boot into Recovery for the one-time security setup (Permissive, disable SIP & Authenticated Root).")
-                Button { model.patchSelected() } label: { Label("Patch…", systemImage: "bandage") }
-                    .disabled(!canPatch)
-                    .help("Patch the guest boot chain (LLB, Preboot + Recovery iBoot/kernelcache). VM must be stopped.")
+                Button { model.patchSelected() } label: {
+                    Label(hasBackup ? "Re-patch…" : "Patch…", systemImage: "bandage")
+                }
+                .disabled(!canPatch)
+                .help(hasBackup
+                      ? "Re-apply the patch (safe/idempotent; use after a guest OS update rewrites the boot chain). VM must be stopped."
+                      : "Patch the guest boot chain (LLB, Preboot + Recovery iBoot/kernelcache). VM must be stopped.")
                 Button { model.patchSelected(unpatch: true) } label: { Label("Unpatch", systemImage: "arrow.uturn.backward") }
                     .disabled(!hasBackup || started || model.bootBusy)
                     .help(hasBackup ? "Restore the originals from backup."
@@ -275,6 +285,14 @@ struct ContentView: View {
 
 struct VMRow: View {
     let vm: VMItem
+    private var subtitle: String {
+        if vm.has_backup == true { return "patched" }
+        return vm.patchable ? "patchable" : "not patchable"
+    }
+    private var subtitleColor: Color {
+        if vm.has_backup == true { return .blue }
+        return vm.patchable ? .green : .secondary
+    }
     var body: some View {
         HStack(spacing: 8) {
             Circle()
@@ -282,9 +300,9 @@ struct VMRow: View {
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 Text(vm.name).lineLimit(1)
-                Text(vm.patchable ? "patchable" : "not patchable")
+                Text(subtitle)
                     .font(.caption)
-                    .foregroundStyle(vm.patchable ? .green : .secondary)
+                    .foregroundStyle(subtitleColor)
             }
             Spacer()
         }

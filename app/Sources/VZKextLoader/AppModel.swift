@@ -38,6 +38,25 @@ final class AppModel: ObservableObject {
         bootLog.append("[\(ts)] \(s)")
     }
 
+    /// Re-query just the selected VM's run status. UTM VMs can be stopped from
+    /// inside their own window without the app knowing; calling this on selection
+    /// change lets re-selecting a VM notice it went away, instead of finding out
+    /// only when Stop errors.
+    func refreshSelectedStatus() {
+        guard let uuid = selectedVM?.uuid, !bootBusy else { return }
+        Task.detached(priority: .utility) {
+            let outcome = await MainActor.run { UTMScript.status(uuid) }
+            guard outcome.ok, !outcome.value.isEmpty else { return }
+            await MainActor.run {
+                self.vms = self.vms.map { vm in
+                    var v = vm
+                    if v.uuid == uuid { v.status = outcome.value }
+                    return v
+                }
+            }
+        }
+    }
+
     func refreshOverlay() {
         Task.detached(priority: .utility) {
             let st = try? Engine.overlayStatus()
