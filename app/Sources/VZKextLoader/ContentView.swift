@@ -238,14 +238,24 @@ struct ContentView: View {
 
     private var bootLogCard: some View {
         GroupBox {
-            ScrollView {
-                Text(model.bootLog.joined(separator: "\n"))
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(model.bootLog.joined(separator: "\n"))
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                        Color.clear.frame(height: 1).id("logBottom")
+                    }
                     .padding(4)
+                }
+                .frame(height: 140)
+                .onChange(of: model.bootLog.count) { _ in
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo("logBottom", anchor: .bottom)
+                    }
+                }
             }
-            .frame(height: 140)
         } label: {
             Label("Activity", systemImage: "text.alignleft")
         }
