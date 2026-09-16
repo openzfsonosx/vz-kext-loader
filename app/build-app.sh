@@ -25,6 +25,10 @@ cp "$BIN" "$APP/Contents/MacOS/VZKextLoader"
 cp Info.plist "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
+# App icon (generate once if missing).
+[ -f AppIcon.icns ] || ./tools/makeicon.sh
+cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
 # Sign with a stable identity so macOS can grant/remember Automation permission
 # for controlling UTM (utmctl uses AppleEvents). Prefer a Developer ID; fall back
 # to ad-hoc. Override the identity with VZKL_SIGN_ID.
