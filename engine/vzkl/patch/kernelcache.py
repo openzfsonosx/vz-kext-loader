@@ -81,11 +81,13 @@ def find_sites(payload: bytes, symbols: list[dict]) -> list[dict]:
                 if tgt == acm_vaddr:
                     off = fpaddr + (ins.address - fvaddr)
                     found.append(off)
-        if len(found) != 1:
+        # 1 = patch it; 0 = already nopped (idempotent re-run); >1 = ambiguous.
+        if len(found) > 1:
             raise KcError(
                 f"{fname}: expected 1 bl to {ACM_SYM}, found {len(found)} "
                 f"{[hex(x) for x in found]}")
-        sites.append({"func": fname, "offset": found[0]})
+        if len(found) == 1:
+            sites.append({"func": fname, "offset": found[0]})
     return sites
 
 
@@ -102,14 +104,19 @@ def patch(img4_bytes: bytes) -> tuple[bytes, dict]:
         symbols = _r2_symbols(pp)
 
     sites = find_sites(bytes(payload), symbols)
-    already = all(payload[s["offset"]:s["offset"] + 4] == NOP for s in sites)
+    if not sites:
+        # Both ACM calls already nopped -> idempotent no-op (skip the recompress).
+        return img4_bytes, {
+            "sites": [], "already_patched": True,
+            "fourcc": parsed.fourcc, "description": parsed.description,
+        }
     for s in sites:
         payload[s["offset"]:s["offset"] + 4] = NOP
 
     new_img4 = img4mod.rewrap(parsed, bytes(payload), compress=True)
     return new_img4, {
         "sites": sites,
-        "already_patched": already,
+        "already_patched": False,
         "fourcc": parsed.fourcc,
         "description": parsed.description,
     }

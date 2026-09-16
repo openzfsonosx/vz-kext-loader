@@ -80,6 +80,35 @@ def _backup_dir(bundle_path: str) -> str:
     return d
 
 
+def _reown(path: str, uid: int, gid: int, mode: int | None = None) -> None:
+    try:
+        os.chown(path, uid, gid)
+        if mode is not None:
+            os.chmod(path, mode)
+    except OSError:
+        pass
+
+
+def _reown_tree(path: str, uid: int, gid: int) -> None:
+    _reown(path, uid, gid)
+    for root, dirs, files in os.walk(path):
+        for n in dirs + files:
+            _reown(os.path.join(root, n), uid, gid)
+
+
+def _restore_bundle_ownership(bundle_path: str, aux_path: str, bdir: str) -> None:
+    """Running as root leaves patched bundle files root-owned, which stops UTM
+    (running as the user) from opening AuxiliaryStorage read-write. Restore the
+    bundle owner on the files we touched. Disk-internal files are inside the
+    image and don't need this."""
+    try:
+        st = os.stat(bundle_path)
+    except OSError:
+        return
+    _reown(aux_path, st.st_uid, st.st_gid, 0o644)
+    _reown_tree(bdir, st.st_uid, st.st_gid)
+
+
 # --- disk image attach / volume discovery -----------------------------------
 #
 # UTM disk images are RAW (no .dmg wrapper), so hdiutil needs
@@ -313,6 +342,11 @@ def patch_vm(uuid: str) -> dict:
     }
     with open(os.path.join(bdir, MANIFEST), "w") as f:
         json.dump(manifest, f, indent=2)
+
+    # We ran as root; hand the bundle files back to the VM's owner so UTM can
+    # open AuxiliaryStorage read-write.
+    _restore_bundle_ownership(bundle, aux, bdir)
+
     return {"ok": True, "patched": sum(1 for e in entries if e.get("state") == "patched"),
             "manifest": os.path.join(bdir, MANIFEST), "entries": entries}
 
