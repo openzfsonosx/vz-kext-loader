@@ -203,11 +203,17 @@ enum Engine {
     }
 
     /// argv for running `vzkl patch-vm` (or --unpatch) as root, with PYTHONPATH
-    /// covering both the engine and the user site-packages. Run via Privileged.run.
+    /// covering both the engine and the user site-packages, and the same extra VM
+    /// search paths the app uses (so root can locate a VM on an external volume).
+    /// Run via Privileged.run.
     static func patchVMArgv(uuid: String, unpatch: Bool) -> [String] {
         let pyPath = engineDir + ":" + userSitePackages()
-        var args = ["/usr/bin/env", "PYTHONPATH=\(pyPath)", python,
-                    "-m", "vzkl", "patch-vm", uuid]
+        var args = ["/usr/bin/env", "PYTHONPATH=\(pyPath)"]
+        let extra = UserDefaults.standard.stringArray(forKey: "extraSearchPaths") ?? []
+        if !extra.isEmpty {
+            args.append("VZKL_VM_SEARCH_PATHS=\(extra.joined(separator: ":"))")
+        }
+        args += [python, "-m", "vzkl", "patch-vm", uuid]
         if unpatch { args.append("--unpatch") }
         args.append("--json")
         return args
