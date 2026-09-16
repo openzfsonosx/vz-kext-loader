@@ -144,9 +144,18 @@ def _find_os_disk(bundle_path: str) -> dict:
     """Attach the OS disk image and mount Preboot (rw) + Recovery (rw)."""
     data = os.path.join(bundle_path, "Data")
     imgs = [os.path.join(data, f) for f in os.listdir(data) if f.endswith(".img")]
+    diag = [f"PATH={os.environ.get('PATH','')}",
+            f"diskutil={__import__('shutil').which('diskutil')}",
+            f"imgs={[os.path.basename(i) for i in imgs]}"]
     for img in sorted(imgs, key=os.path.getsize, reverse=True):
         whole, apfs = _attach_raw(img)
+        _cp = run(["diskutil", "apfs", "list", "-plist"])
+        _d = _plist(_cp.stdout)
+        _ncont = len(_d.get("Containers", []))
         vols = _volumes_on(apfs)
+        diag.append(f"{os.path.basename(img)}: whole={whole} apfs={apfs} "
+                    f"diskutil_rc={_cp.returncode} containers={_ncont} "
+                    f"roles={list(vols.keys())}")
         if "Preboot" in vols:
             preboot_mnt = _mount(vols["Preboot"], rw=True)
             # Safety: never operate on the host's live volumes.
@@ -161,7 +170,8 @@ def _find_os_disk(bundle_path: str) -> dict:
             return {"img": img, "whole_dev": whole,
                     "preboot_mnt": preboot_mnt, "recovery": recovery}
         _detach(whole)
-    raise PatchVMError("no disk image with a Preboot volume found")
+    raise PatchVMError("no disk image with a Preboot volume found | "
+                       + " || ".join(diag))
 
 
 def _active_nsih(preboot_mnt: str) -> tuple[str, str]:
