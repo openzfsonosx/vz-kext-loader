@@ -98,15 +98,39 @@ enum EngineError: LocalizedError {
 /// Locates and runs the Python engine (`python3 -m vzkl ...`).
 enum Engine {
 
-    static let python = "/usr/bin/python3"
+    /// The self-contained runtime inside the app bundle (python + r2 + vzkl),
+    /// produced by build-runtime.sh at Resources/runtime. nil when running from
+    /// source (`swift run`), where we fall back to system python + the repo
+    /// engine + whatever r2 is on PATH.
+    static var bundledRuntime: String? {
+        guard let res = Bundle.main.resourcePath else { return nil }
+        let rt = res + "/runtime"
+        return FileManager.default.fileExists(atPath: rt + "/vzkl/__main__.py") ? rt : nil
+    }
+
+    /// Python interpreter. Bundled runtime's python3 when present (it finds its
+    /// own site-packages: pyimg4/capstone), else the system python for dev.
+    static var python: String {
+        if let p = ProcessInfo.processInfo.environment["VZKL_PYTHON"], !p.isEmpty { return p }
+        if let rt = bundledRuntime { return rt + "/python/bin/python3" }
+        return "/usr/bin/python3"
+    }
 
     /// Directory containing the `vzkl` package. Overridable via VZKL_ENGINE_DIR;
-    /// defaults to the repo layout under the user's home.
+    /// the bundled runtime when present; else the repo layout under $HOME.
     static var engineDir: String {
         if let env = ProcessInfo.processInfo.environment["VZKL_ENGINE_DIR"], !env.isEmpty {
             return env
         }
+        if let rt = bundledRuntime { return rt }
         return NSHomeDirectory() + "/src/vz-kext-loader/engine"
+    }
+
+    /// Bundled radare2 bin dir to prepend to PATH (nil when running from source).
+    static var r2BinDir: String? {
+        guard let rt = bundledRuntime else { return nil }
+        let d = rt + "/r2/bin"
+        return FileManager.default.fileExists(atPath: d + "/r2") ? d : nil
     }
 
     /// Run `vzkl <args> --json`, decoding the JSON into `T`.
@@ -121,10 +145,16 @@ enum Engine {
         proc.arguments = ["-m", "vzkl"] + args + ["--json"]
         proc.currentDirectoryURL = URL(fileURLWithPath: dir)
 
-        // Clean, predictable environment. Keep HOME (user site-packages) and a
-        // sane PATH so r2/utmctl resolve.
+        // Clean, predictable environment. Keep HOME (user site-packages in dev)
+        // and a sane PATH so r2/utmctl resolve. When bundled, prepend the app's
+        // own r2 so it wins over any Homebrew copy, and skip external plugins.
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
+        var searchPath = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
+        if let r2 = r2BinDir {
+            searchPath = r2 + ":" + searchPath
+            env["R2_NOPLUGINS"] = "1"
+        }
+        env["PATH"] = searchPath
         // Extra VM search directories the user added (persisted).
         let extra = UserDefaults.standard.stringArray(forKey: "extraSearchPaths") ?? []
         if !extra.isEmpty {
@@ -211,9 +241,16 @@ enum Engine {
     }
 
     static func patchVMArgv(uuid: String, unpatch: Bool) -> [String] {
-        let pyPath = engineDir + ":" + userSitePackages()
+        // Bundled: the bundled python finds its own site-packages, so PYTHONPATH
+        // only needs the runtime dir (vzkl). Dev: system python + user site.
+        let pyPath = bundledRuntime != nil ? engineDir
+                                           : engineDir + ":" + userSitePackages()
         var args = ["/usr/bin/env", "PYTHONPATH=\(pyPath)",
                     "VZKL_PROGRESS_FILE=\(progressPath(uuid: uuid))"]
+        if let r2 = r2BinDir {
+            args.append("PATH=\(r2):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin")
+            args.append("R2_NOPLUGINS=1")
+        }
         let extra = UserDefaults.standard.stringArray(forKey: "extraSearchPaths") ?? []
         if !extra.isEmpty {
             args.append("VZKL_VM_SEARCH_PATHS=\(extra.joined(separator: ":"))")
