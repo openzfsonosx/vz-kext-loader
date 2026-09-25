@@ -362,3 +362,5 @@ patchable classification, and boot-with-overlay orchestration.
 ![vz-kext-loader — VM list and host summary](img/vz-kext-loader1.jpg)
 
 ![vz-kext-loader — host requirements detail](img/vz-kext-loader2.jpg)
+
+![vz-kext-loader — patched VMs and boot orchestration](img/vz-kext-loader4.jpg)
