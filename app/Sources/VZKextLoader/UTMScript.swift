@@ -1,10 +1,15 @@
 import Foundation
-import CoreServices
+import AppKit
 
 /// Controls UTM by scripting it directly (AppleEvents) from *this app*, so macOS
-/// attributes the Automation permission to vz-kext-loader (which declares
-/// NSAppleEventsUsageDescription). Spawning utmctl as a child does not attribute
-/// the grant reliably, which is why that path failed with "not found".
+/// attributes any Automation permission to vz-kext-loader (which declares
+/// NSAppleEventsUsageDescription + the apple-events entitlement).
+///
+/// NB: on some systems macOS silently denies the Automation prompt for this app
+/// even though signature, entitlement, usage string and activation policy are all
+/// correct (errAEEventNotPermitted with no consent prompt and no Settings entry).
+/// The boot flow therefore treats a scripting failure as non-fatal and falls back
+/// to opening UTM for a manual start — see AppModel.bootSelected.
 enum UTMScript {
 
     static let utmBundleID = "com.utmapp.UTM"
@@ -15,51 +20,37 @@ enum UTMScript {
         let error: String?
     }
 
-    /// Explicitly request Automation permission for UTM, showing the consent
-    /// dialog if needed. `NSAppleScript` alone can return "not permitted"
-    /// WITHOUT prompting; this API reliably triggers the prompt.
-    /// Returns nil if permitted, otherwise a human-readable reason.
+    /// Launch UTM (the manual-start fallback when Automation isn't available).
     @MainActor
-    @discardableResult
-    static func ensurePermission() -> String? {
-        var target = AEAddressDesc()
-        guard let data = utmBundleID.data(using: .utf8) else {
-            return "could not build target"
-        }
-        let createErr = data.withUnsafeBytes { raw -> OSErr in
-            AECreateDesc(typeApplicationBundleID, raw.baseAddress, data.count, &target)
-        }
-        if createErr != noErr { return "AECreateDesc failed (\(createErr))" }
-        defer { AEDisposeDesc(&target) }
+    static func openUTM() {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: utmBundleID)
+        else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
 
-        let status = AEDeterminePermissionToAutomateTarget(
-            &target, typeWildCard, typeWildCard, true /* ask user if needed */)
-        switch status {
-        case noErr:
-            return nil
-        case OSStatus(errAEEventNotPermitted):
-            return "Automation permission for UTM was denied. Enable it in System "
-                 + "Settings › Privacy & Security › Automation."
-        case OSStatus(procNotFound):
+    /// Map an NSAppleScript error dict to a user-facing message.
+    private static func permissionMessage(for err: NSDictionary) -> String {
+        let code = (err[NSAppleScript.errorNumber] as? Int) ?? 0
+        switch code {
+        case -1743:   // errAEEventNotPermitted — Automation denied
+            return "macOS did not grant Automation permission to control UTM."
+        case -600, -1728:   // procNotFound / app isn't running
             return "UTM does not appear to be running."
         default:
-            return "Automation permission check failed (\(status))."
+            return (err[NSAppleScript.errorMessage] as? String)
+                ?? "AppleScript error (\(code))."
         }
     }
 
     @MainActor
     private static func runAppleScript(_ source: String) -> Outcome {
-        if let denied = ensurePermission() {
-            return Outcome(ok: false, value: "", error: denied)
-        }
         var errorDict: NSDictionary?
         guard let script = NSAppleScript(source: source) else {
             return Outcome(ok: false, value: "", error: "could not build AppleScript")
         }
         let result = script.executeAndReturnError(&errorDict)
         if let err = errorDict {
-            let msg = (err[NSAppleScript.errorMessage] as? String) ?? "AppleScript error"
-            return Outcome(ok: false, value: "", error: msg)
+            return Outcome(ok: false, value: "", error: permissionMessage(for: err))
         }
         return Outcome(ok: true, value: result.stringValue ?? "", error: nil)
     }

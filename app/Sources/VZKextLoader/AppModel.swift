@@ -95,7 +95,15 @@ final class AppModel: ObservableObject {
                 await step("Starting VM (scripting UTM)…")
                 let s = await MainActor.run { UTMScript.start(vm.uuid) }
                 guard s.ok else {
-                    throw EngineError.launchFailed(s.error ?? "UTM start failed")
+                    // The hard part (patch + overlay) is done. If we can't script
+                    // UTM (e.g. macOS denied Automation), don't fail the boot —
+                    // open UTM and let the user press Play manually.
+                    await step("\(s.error ?? "Could not start via UTM").")
+                    await step("Overlay mounted and \(vm.name) is patched — "
+                             + "opening UTM; press ▶ on \(vm.name) to boot it.")
+                    await MainActor.run { UTMScript.openUTM() }
+                    await MainActor.run { self.bootBusy = false; self.loadVMs() }
+                    return
                 }
                 await step("Start issued; watching status…")
                 for _ in 0..<20 {

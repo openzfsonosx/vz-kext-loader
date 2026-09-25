@@ -142,13 +142,18 @@ enum Engine {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: python)
-        proc.arguments = ["-m", "vzkl"] + args + ["--json"]
+        // -B: never write .pyc. Writing bytecode into the signed .app bundle
+        // invalidates its code signature, which makes macOS treat the app as
+        // untrusted and silently denies Automation (control UTM) — no prompt,
+        // no Settings entry. Keep the bundle immutable at runtime.
+        proc.arguments = ["-B", "-m", "vzkl"] + args + ["--json"]
         proc.currentDirectoryURL = URL(fileURLWithPath: dir)
 
         // Clean, predictable environment. Keep HOME (user site-packages in dev)
         // and a sane PATH so r2/utmctl resolve. When bundled, prepend the app's
         // own r2 so it wins over any Homebrew copy, and skip external plugins.
         var env = ProcessInfo.processInfo.environment
+        env["PYTHONDONTWRITEBYTECODE"] = "1"     // belt-and-suspenders with -B
         var searchPath = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
         if let r2 = r2BinDir {
             searchPath = r2 + ":" + searchPath
@@ -246,6 +251,7 @@ enum Engine {
         let pyPath = bundledRuntime != nil ? engineDir
                                            : engineDir + ":" + userSitePackages()
         var args = ["/usr/bin/env", "PYTHONPATH=\(pyPath)",
+                    "PYTHONDONTWRITEBYTECODE=1",     // don't mutate the signed bundle
                     "VZKL_PROGRESS_FILE=\(progressPath(uuid: uuid))"]
         if let r2 = r2BinDir {
             args.append("PATH=\(r2):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin")
@@ -255,7 +261,7 @@ enum Engine {
         if !extra.isEmpty {
             args.append("VZKL_VM_SEARCH_PATHS=\(extra.joined(separator: ":"))")
         }
-        args += [python, "-m", "vzkl", "patch-vm", uuid]
+        args += [python, "-B", "-m", "vzkl", "patch-vm", uuid]
         if unpatch { args.append("--unpatch") }
         args.append("--json")
         return args

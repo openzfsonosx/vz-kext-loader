@@ -114,7 +114,11 @@ find "$OUT/vzkl" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/nul
 # Self-test: run the full engine (pyimg4 + capstone + r2) self-contained.
 # ---------------------------------------------------------------------------
 say "self-test: importing engine + running r2 from the bundle"
-PATH="$PWD/$OUT/r2/bin:$PATH" PYTHONPATH="$PWD/$OUT" R2_NOPLUGINS=1 "$PY" - <<'PY'
+# PYTHONDONTWRITEBYTECODE so the self-test leaves NO .pyc in the tree — the app
+# runs the engine with -B too, because writing bytecode into the signed .app
+# invalidates its signature and silently breaks Automation (TCC) permission.
+PATH="$PWD/$OUT/r2/bin:$PATH" PYTHONPATH="$PWD/$OUT" R2_NOPLUGINS=1 \
+    PYTHONDONTWRITEBYTECODE=1 "$PY" - <<'PY'
 import shutil, subprocess
 assert "runtime/r2/bin" in (shutil.which("r2") or ""), "bundled r2 not on PATH"
 import vzkl.patch.kernelcache, vzkl.patch.iboot, vzkl.patch.img4   # noqa

@@ -34,6 +34,11 @@ RT_SRC="${VZKL_RUNTIME:-runtime}"
 [ -d "$RT_SRC" ] || { echo ">> runtime missing; building it"; ./build-runtime.sh "$RT_SRC"; }
 echo ">> embedding runtime -> $APP/Contents/Resources/runtime"
 cp -R "$RT_SRC" "$APP/Contents/Resources/runtime"
+# Strip precompiled bytecode so the signature seals a .pyc-free tree. The app
+# runs the engine with -B/PYTHONDONTWRITEBYTECODE, so none are written back in;
+# a .pyc written into the signed bundle at runtime would invalidate the
+# signature and silently break Automation (TCC) permission to control UTM.
+find "$APP/Contents/Resources/runtime" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
 # Sign with a stable identity so macOS can grant/remember Automation permission
 # for controlling UTM (utmctl uses AppleEvents). Prefer a Developer ID; fall back
