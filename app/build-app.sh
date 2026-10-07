@@ -32,6 +32,13 @@ cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Embed the self-contained runtime (python + r2 + vzkl). Build it if absent.
 RT_SRC="${VZKL_RUNTIME:-runtime}"
 [ -d "$RT_SRC" ] || { echo ">> runtime missing; building it"; ./build-runtime.sh "$RT_SRC"; }
+# Always refresh the vzkl engine from source (python/r2 are stable and slow to
+# re-vendor; engine code changes often), so a rebuild picks up engine edits
+# without re-running build-runtime.sh.
+if [ -d ../engine/vzkl ]; then
+    rm -rf "$RT_SRC/vzkl"; cp -R ../engine/vzkl "$RT_SRC/vzkl"
+    find "$RT_SRC/vzkl" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+fi
 echo ">> embedding runtime -> $APP/Contents/Resources/runtime"
 cp -R "$RT_SRC" "$APP/Contents/Resources/runtime"
 # Strip precompiled bytecode so the signature seals a .pyc-free tree. The app
