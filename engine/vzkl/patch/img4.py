@@ -13,13 +13,18 @@ Reliability notes learned in the field:
 from __future__ import annotations
 import os
 import subprocess
+import sys
 import tempfile
 
 import pyimg4
 
 
 def _cli(*args) -> None:
-    subprocess.run(["python3", "-m", "pyimg4", *args],
+    # Run pyimg4 with the interpreter running the engine (the app's bundled
+    # runtime, which has pyimg4 importable). PATH's `python3` is not reliable:
+    # the app sets PATH to system pythons, and the system python has no
+    # pyimg4.
+    subprocess.run([sys.executable or "python3", "-m", "pyimg4", *args],
                    check=True, capture_output=True)
 
 
