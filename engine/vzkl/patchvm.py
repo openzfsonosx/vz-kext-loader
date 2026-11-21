@@ -127,13 +127,24 @@ def _attach_raw(img: str) -> tuple[str, list[str]]:
     apfs_parts is every APFS-bearing partition on the image (main, ISC, recovery);
     the caller checks each container for the one with a Preboot volume, since the
     system-entities order is not deterministic.
+
+    macOS 27: `diskutil image attach` returns the whole disk AND its
+    partitions; the older `hdiutil attach -nomount` returns only the whole
+    for raw disk images, so try the new API first and fall back to hdiutil
+    on older macOS.
     """
-    cp = run(["hdiutil", "attach", "-nobrowse", "-nomount", "-noverify",
-              "-imagekey", "diskimage-class=CRawDiskImage", "-plist", img],
-             timeout=180)
-    if cp.returncode != 0:
-        raise PatchVMError(f"hdiutil attach failed: {cp.stderr.strip() or cp.stdout.strip()}")
-    ents = _plist(cp.stdout).get("system-entities", [])
+    ents: list = []
+    cp = run(["diskutil", "image", "attach", "--plist", "--nobrowse",
+              "--noMount", img], timeout=180)
+    if cp.returncode == 0:
+        ents = _plist(cp.stdout).get("system-entities", [])
+    if not ents:
+        cp = run(["hdiutil", "attach", "-nobrowse", "-nomount", "-noverify",
+                  "-imagekey", "diskimage-class=CRawDiskImage", "-plist", img],
+                 timeout=180)
+        if cp.returncode != 0:
+            raise PatchVMError(f"hdiutil attach failed: {cp.stderr.strip() or cp.stdout.strip()}")
+        ents = _plist(cp.stdout).get("system-entities", [])
     whole = next((e["dev-entry"] for e in ents
                   if e.get("content-hint") == "GUID_partition_scheme"), None)
     apfs_parts = [e["dev-entry"] for e in ents
